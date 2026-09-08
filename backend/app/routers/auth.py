@@ -1,7 +1,7 @@
 from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from app.database import get_db
 from app.models import User
@@ -13,18 +13,19 @@ router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
-    # Check if user with email already exists
-    existing_user = db.query(User).filter(User.email == user_in.email).first()
+    email_clean = user_in.email.strip().lower()
+    
+    # Case-insensitive check for existing user
+    existing_user = db.query(User).filter(func.lower(User.email) == email_clean).first()
     if existing_user:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A user with this email address already exists."
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A user account with this email address already exists."
         )
     
-    # Hash password and create user
     hashed_pwd = get_password_hash(user_in.password)
     db_user = User(
-        email=user_in.email,
+        email=email_clean,
         full_name=user_in.full_name,
         hashed_password=hashed_pwd,
         is_active=True
@@ -37,7 +38,9 @@ def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=Token)
 def login_for_access_token(user_credentials: UserLogin, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == user_credentials.email).first()
+    email_clean = user_credentials.email.strip().lower()
+    user = db.query(User).filter(func.lower(User.email) == email_clean).first()
+    
     if not user or not verify_password(user_credentials.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -46,7 +49,10 @@ def login_for_access_token(user_credentials: UserLogin, db: Session = Depends(ge
         )
     
     if not user.is_active:
-        raise HTTPException(status_code=400, detail="Inactive user account.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Inactive user account. Contact system administrator."
+        )
 
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(

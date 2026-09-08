@@ -1,7 +1,7 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 
 from app.database import get_db
 from app.models import Customer, User
@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/customers", tags=["Customer Management"])
 
 @router.get("", response_model=CustomerListResponse)
 def get_customers(
-    search: Optional[str] = Query(None, description="Search term for name, email, or company"),
+    search: Optional[str] = Query(None, description="Search term for name, email, company, or phone"),
     status: Optional[str] = Query(None, description="Filter by customer status (Active, Lead, Prospect, Inactive)"),
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(10, ge=1, le=100, description="Items per page"),
@@ -21,9 +21,9 @@ def get_customers(
 ):
     query = db.query(Customer)
 
-    # Filter by search string (name, email, company)
+    # Filter by search string across fields
     if search:
-        search_pattern = f"%{search}%"
+        search_pattern = f"%{search.strip()}%"
         query = query.filter(
             or_(
                 Customer.name.ilike(search_pattern),
@@ -33,9 +33,10 @@ def get_customers(
             )
         )
 
-    # Filter by status if provided
-    if status and status != "All":
-        query = query.filter(Customer.status == status)
+    # Filter by status if provided and not "All"
+    if status and status.strip() and status.strip() != "All":
+        clean_status = status.strip().capitalize()
+        query = query.filter(Customer.status == clean_status)
 
     total = query.count()
     offset = (page - 1) * limit
@@ -55,6 +56,12 @@ def get_customer_by_id(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    if customer_id <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid customer ID. Must be a positive integer."
+        )
+
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(
@@ -70,16 +77,21 @@ def create_customer(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Check if email is already used by another customer
-    existing = db.query(Customer).filter(Customer.email == customer_in.email).first()
+    email_clean = customer_in.email.strip().lower()
+
+    # Case-insensitive duplicate check for customer email
+    existing = db.query(Customer).filter(func.lower(Customer.email) == email_clean).first()
     if existing:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A customer with this email address already exists."
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"A customer with the email address '{email_clean}' already exists."
         )
 
+    customer_data = customer_in.model_dump()
+    customer_data["email"] = email_clean
+
     new_customer = Customer(
-        **customer_in.model_dump(),
+        **customer_data,
         owner_id=current_user.id
     )
     db.add(new_customer)
@@ -95,6 +107,12 @@ def update_customer(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    if customer_id <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid customer ID. Must be a positive integer."
+        )
+
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(
@@ -103,15 +121,18 @@ def update_customer(
         )
 
     update_data = customer_in.model_dump(exclude_unset=True)
-    
-    # Check email duplicate if email is being updated
-    if "email" in update_data and update_data["email"] != customer.email:
-        existing = db.query(Customer).filter(Customer.email == update_data["email"]).first()
-        if existing:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="A customer with this email address already exists."
-            )
+
+    # Check for email duplicate if email is being modified
+    if "email" in update_data and update_data["email"]:
+        new_email = update_data["email"].strip().lower()
+        if new_email != customer.email.lower():
+            existing = db.query(Customer).filter(func.lower(Customer.email) == new_email).first()
+            if existing and existing.id != customer_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"A customer with the email address '{new_email}' already exists."
+                )
+        update_data["email"] = new_email
 
     for field, value in update_data.items():
         setattr(customer, field, value)
@@ -127,6 +148,12 @@ def delete_customer(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    if customer_id <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid customer ID. Must be a positive integer."
+        )
+
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(
