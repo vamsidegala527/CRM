@@ -19,11 +19,8 @@ def get_customers(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    """List all customers with full-text search, status filter, and pagination (Admin Only)"""
     query = db.query(Customer)
-
-    # Scoping: Normal users only see their own customer records
-    if current_user.role != "admin":
-        query = query.filter(Customer.owner_id == current_user.id)
 
     # Filter by search string across fields
     if search and search.strip():
@@ -60,6 +57,7 @@ def get_customer_by_id(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    """Retrieve detailed customer record by ID (Admin Only)"""
     if customer_id <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -73,13 +71,6 @@ def get_customer_by_id(
             detail=f"Customer with ID {customer_id} not found."
         )
 
-    # Ownership check: Normal users can only access their own records
-    if current_user.role != "admin" and customer.owner_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access forbidden: You do not own this customer record."
-        )
-
     return customer
 
 
@@ -89,9 +80,10 @@ def create_customer(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    """Create a new customer record (Admin Only)"""
     email_clean = customer_in.email.strip().lower()
 
-    # Duplicate check for customer email
+    # Case-insensitive duplicate check for customer email
     existing = db.query(Customer).filter(func.lower(Customer.email) == email_clean).first()
     if existing:
         raise HTTPException(
@@ -119,6 +111,7 @@ def update_customer(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    """Update an existing customer record (Admin Only)"""
     if customer_id <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -130,13 +123,6 @@ def update_customer(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Customer with ID {customer_id} not found."
-        )
-
-    # Ownership check: Normal users can only modify their own records
-    if current_user.role != "admin" and customer.owner_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access forbidden: You cannot modify another user's customer record."
         )
 
     update_data = customer_in.model_dump(exclude_unset=True)
@@ -167,6 +153,7 @@ def delete_customer(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    """Delete a customer record (Admin Only)"""
     if customer_id <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -178,13 +165,6 @@ def delete_customer(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Customer with ID {customer_id} not found."
-        )
-
-    # Ownership check: Normal users can only delete their own records
-    if current_user.role != "admin" and customer.owner_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access forbidden: You cannot delete another user's customer record."
         )
 
     db.delete(customer)

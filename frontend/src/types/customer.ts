@@ -1,5 +1,4 @@
 export type CustomerStatus = 'Active' | 'Lead' | 'Prospect' | 'Inactive';
-export type UserRole = 'admin' | 'user';
 
 export interface Customer {
   id: number;
@@ -36,7 +35,6 @@ export interface User {
   id: number;
   email: string;
   full_name: string;
-  role: UserRole;
   is_active: boolean;
   created_at: string;
 }

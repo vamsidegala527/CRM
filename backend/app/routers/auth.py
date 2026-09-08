@@ -20,7 +20,7 @@ def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="A user account with this email address already exists."
+            detail="An Admin user account with this email address already exists."
         )
     
     hashed_pwd = get_password_hash(user_in.password)
@@ -28,7 +28,6 @@ def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
         email=email_clean,
         full_name=user_in.full_name,
         hashed_password=hashed_pwd,
-        role=user_in.role or "user",
         is_active=True
     )
     db.add(db_user)
@@ -52,7 +51,7 @@ def login_for_access_token(user_credentials: UserLogin, db: Session = Depends(ge
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Inactive user account. Contact system administrator."
+            detail="Inactive Admin account. Contact system administrator."
         )
 
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
