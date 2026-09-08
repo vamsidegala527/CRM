@@ -4,6 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel, EmailStr, field_validator, Field, ConfigDict
 
 VALID_STATUSES = {"Active", "Lead", "Prospect", "Inactive"}
+VALID_ROLES = {"admin", "user"}
 PHONE_REGEX = re.compile(r"^\+?[0-9\s\-\(\)\.]{7,20}$")
 
 def validate_phone_number(v: Optional[str]) -> Optional[str]:
@@ -23,6 +24,7 @@ def validate_phone_number(v: Optional[str]) -> Optional[str]:
 class UserBase(BaseModel):
     email: EmailStr
     full_name: str = Field(..., min_length=2, max_length=100)
+    role: Optional[str] = "user"
 
     @field_validator("email", mode="before")
     @classmethod
@@ -41,6 +43,16 @@ class UserBase(BaseModel):
             if len(v) < 2:
                 raise ValueError("Full name must be at least 2 characters long.")
         return v
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def validate_role(cls, v: Optional[str]) -> str:
+        if not v:
+            return "user"
+        v_clean = str(v).strip().lower()
+        if v_clean not in VALID_ROLES:
+            return "user"
+        return v_clean
 
 class UserCreate(UserBase):
     password: str = Field(..., min_length=6, max_length=72)
@@ -66,8 +78,23 @@ class UserLogin(BaseModel):
             return v.strip().lower()
         return v
 
+class UserUpdateRole(BaseModel):
+    role: str
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        v = str(v).strip().lower()
+        if v not in VALID_ROLES:
+            raise ValueError(f"Invalid role '{v}'. Allowed roles: admin, user.")
+        return v
+
+class UserUpdateStatus(BaseModel):
+    is_active: bool
+
 class UserResponse(UserBase):
     id: int
+    role: str
     is_active: bool
     created_at: datetime
 

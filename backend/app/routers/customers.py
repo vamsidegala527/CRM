@@ -21,8 +21,12 @@ def get_customers(
 ):
     query = db.query(Customer)
 
+    # Scoping: Normal users only see their own customer records
+    if current_user.role != "admin":
+        query = query.filter(Customer.owner_id == current_user.id)
+
     # Filter by search string across fields
-    if search:
+    if search and search.strip():
         search_pattern = f"%{search.strip()}%"
         query = query.filter(
             or_(
@@ -68,6 +72,14 @@ def get_customer_by_id(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Customer with ID {customer_id} not found."
         )
+
+    # Ownership check: Normal users can only access their own records
+    if current_user.role != "admin" and customer.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access forbidden: You do not own this customer record."
+        )
+
     return customer
 
 
@@ -79,7 +91,7 @@ def create_customer(
 ):
     email_clean = customer_in.email.strip().lower()
 
-    # Case-insensitive duplicate check for customer email
+    # Duplicate check for customer email
     existing = db.query(Customer).filter(func.lower(Customer.email) == email_clean).first()
     if existing:
         raise HTTPException(
@@ -118,6 +130,13 @@ def update_customer(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Customer with ID {customer_id} not found."
+        )
+
+    # Ownership check: Normal users can only modify their own records
+    if current_user.role != "admin" and customer.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access forbidden: You cannot modify another user's customer record."
         )
 
     update_data = customer_in.model_dump(exclude_unset=True)
@@ -159,6 +178,13 @@ def delete_customer(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Customer with ID {customer_id} not found."
+        )
+
+    # Ownership check: Normal users can only delete their own records
+    if current_user.role != "admin" and customer.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access forbidden: You cannot delete another user's customer record."
         )
 
     db.delete(customer)

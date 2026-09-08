@@ -1,4 +1,4 @@
-import { Customer, CustomerInput, CustomerListResponse, AuthResponse, User } from '../types/customer';
+import { Customer, CustomerInput, CustomerListResponse, AuthResponse, User, UserRole } from '../types/customer';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -95,7 +95,7 @@ export const api = {
     return res;
   },
 
-  async register(userData: { email: string; password: string; full_name: string }): Promise<User> {
+  async register(userData: { email: string; password: string; full_name: string; role?: string }): Promise<User> {
     return request<User>('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify(userData),
@@ -106,6 +106,25 @@ export const api = {
     const user = await request<User>('/api/auth/me');
     setStoredUser(user);
     return user;
+  },
+
+  // Admin User Management APIs
+  async getUsers(): Promise<User[]> {
+    return request<User[]>('/api/users');
+  },
+
+  async updateUserRole(userId: number, role: UserRole): Promise<User> {
+    return request<User>(`/api/users/${userId}/role`, {
+      method: 'PUT',
+      body: JSON.stringify({ role }),
+    });
+  },
+
+  async updateUserStatus(userId: number, is_active: boolean): Promise<User> {
+    return request<User>(`/api/users/${userId}/status`, {
+      method: 'PUT',
+      body: JSON.stringify({ is_active }),
+    });
   },
 
   // Customer Management REST APIs

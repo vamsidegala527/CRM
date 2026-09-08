@@ -1,39 +1,39 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
-from app.routers import auth, customers
+from app.routers import auth, customers, users
 
-# Create PostgreSQL tables on startup if connected
 try:
     Base.metadata.create_all(bind=engine)
 except Exception as e:
-    print(f"PostgreSQL Table Creation Warning (Database connection pending startup): {e}")
+    print(f"PostgreSQL Table Creation Warning: {e}")
 
 app = FastAPI(
-    title="Customer Management REST API",
-    description="Backend Python REST API for Customer Management using PostgreSQL",
-    version="1.0.0"
+    title="Customer Management REST API (RBAC Enabled)",
+    description="Backend Python REST API with Role-Based Access Control (Admin vs Normal User) and PostgreSQL Database",
+    version="1.1.0"
 )
 
-# Enable CORS for Next.js frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include Routers
+# Register API Routers
 app.include_router(auth.router)
 app.include_router(customers.router)
+app.include_router(users.router)
 
 @app.get("/")
 def read_root():
     return {
         "status": "online",
-        "message": "Customer Management REST API is running",
+        "message": "Customer Management REST API (RBAC Enabled) is running",
         "database": "PostgreSQL",
+        "rbac": "Admin & User roles enforced",
         "docs_url": "/docs"
     }
 

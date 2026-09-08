@@ -6,25 +6,45 @@ def seed_database():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
-        # Check if admin user exists
+        # Seed Admin User
         admin = db.query(User).filter(User.email == "admin@example.com").first()
         if not admin:
-            print("Creating default admin user (admin@example.com / admin123)...")
+            print("Creating Admin user (admin@example.com / admin123)...")
             admin = User(
                 email="admin@example.com",
                 full_name="System Administrator",
                 hashed_password=get_password_hash("admin123"),
+                role="admin",
                 is_active=True
             )
             db.add(admin)
             db.commit()
             db.refresh(admin)
+        else:
+            admin.role = "admin"
+            db.commit()
+
+        # Seed Normal User
+        normal_user = db.query(User).filter(User.email == "user@example.com").first()
+        if not normal_user:
+            print("Creating Normal user (user@example.com / user123)...")
+            normal_user = User(
+                email="user@example.com",
+                full_name="John Standard User",
+                hashed_password=get_password_hash("user123"),
+                role="user",
+                is_active=True
+            )
+            db.add(normal_user)
+            db.commit()
+            db.refresh(normal_user)
 
         # Check existing customers
         existing_count = db.query(Customer).count()
         if existing_count == 0:
-            print("Seeding sample customer records...")
+            print("Seeding sample customer records for Admin and Normal User...")
             sample_customers = [
+                # Admin-owned customers
                 {
                     "name": "Sarah Connor",
                     "email": "sarah.connor@cyberdyne.com",
@@ -55,6 +75,7 @@ def seed_database():
                     "notes": "Annual contract renewal coming up Q4.",
                     "owner_id": admin.id
                 },
+                # Normal User-owned customers
                 {
                     "name": "David Chen",
                     "email": "dchen@nexuscloud.tech",
@@ -63,7 +84,7 @@ def seed_database():
                     "address": "888 Silicon Way, Austin, TX 78701",
                     "status": "Prospect",
                     "notes": "Demo scheduled for next Tuesday.",
-                    "owner_id": admin.id
+                    "owner_id": normal_user.id
                 },
                 {
                     "name": "Priya Sharma",
@@ -73,7 +94,7 @@ def seed_database():
                     "address": "MG Road, Tech Hub, Bengaluru, India 560001",
                     "status": "Active",
                     "notes": "Expanded cloud storage tier last month.",
-                    "owner_id": admin.id
+                    "owner_id": normal_user.id
                 },
                 {
                     "name": "Marcus Vance",
@@ -83,7 +104,7 @@ def seed_database():
                     "address": "200 Wall Street, New York, NY 10005",
                     "status": "Inactive",
                     "notes": "Requested account pause until next fiscal year.",
-                    "owner_id": admin.id
+                    "owner_id": normal_user.id
                 }
             ]
 
@@ -92,7 +113,7 @@ def seed_database():
                 db.add(customer)
             
             db.commit()
-            print("Successfully seeded 6 customer records!")
+            print("Successfully seeded customer records for Admin and Normal User!")
         else:
             print(f"Database already contains {existing_count} customers.")
 

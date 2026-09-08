@@ -28,6 +28,7 @@ def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
         email=email_clean,
         full_name=user_in.full_name,
         hashed_password=hashed_pwd,
+        role=user_in.role or "user",
         is_active=True
     )
     db.add(db_user)

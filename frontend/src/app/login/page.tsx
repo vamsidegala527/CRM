@@ -11,14 +11,22 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [role, setRole] = useState('user');
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  const handleFillDemo = () => {
+  const handleFillAdminDemo = () => {
     setEmail('admin@example.com');
     setPassword('admin123');
+    setIsRegister(false);
+    setError(null);
+  };
+
+  const handleFillUserDemo = () => {
+    setEmail('user@example.com');
+    setPassword('user123');
     setIsRegister(false);
     setError(null);
   };
@@ -36,8 +44,8 @@ export default function LoginPage() {
           setLoading(false);
           return;
         }
-        await api.register({ email, password, full_name: fullName });
-        setSuccessMsg('Registration successful! Please log in with your new credentials.');
+        await api.register({ email, password, full_name: fullName, role });
+        setSuccessMsg('Registration successful! Please log in with your credentials.');
         setIsRegister(false);
         setPassword('');
       } else {
@@ -89,7 +97,7 @@ export default function LoginPage() {
             {isRegister ? 'Create an Account' : 'Welcome Back'}
           </h2>
           <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-            {isRegister ? 'Register to access Customer Management Portal' : 'Sign in to access your PostgreSQL customer database'}
+            {isRegister ? 'Register to access Customer Management Portal' : 'Sign in to your role-authorized customer database'}
           </p>
         </div>
 
@@ -126,17 +134,31 @@ export default function LoginPage() {
         {/* Form */}
         <form onSubmit={handleSubmit}>
           {isRegister && (
-            <div className="form-group">
-              <label className="form-label">Full Name</label>
-              <input
-                type="text"
-                className="form-control"
-                placeholder="e.g. John Smith"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                required
-              />
-            </div>
+            <>
+              <div className="form-group">
+                <label className="form-label">Full Name</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. John Smith"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Account Role</label>
+                <select
+                  className="form-control"
+                  value={role}
+                  onChange={(e) => setRole(e.target.value)}
+                >
+                  <option value="user">Normal User (Own Data Scoped)</option>
+                  <option value="admin">Administrator (Full Access)</option>
+                </select>
+              </div>
+            </>
           )}
 
           <div className="form-group">
@@ -173,16 +195,24 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* Quick Demo Credentials Button */}
+        {/* Quick Demo Credentials Presets */}
         {!isRegister && (
-          <div style={{ marginTop: '1rem' }}>
+          <div style={{ marginTop: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             <button
-              onClick={handleFillDemo}
+              onClick={handleFillAdminDemo}
               type="button"
               className="btn btn-secondary"
-              style={{ width: '100%', fontSize: '0.8rem', padding: '0.5rem' }}
+              style={{ fontSize: '0.8rem', padding: '0.5rem', background: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.3)' }}
             >
-              &#128273; Fill Demo Account (admin@example.com)
+              👑 Fill Admin Account (admin@example.com)
+            </button>
+            <button
+              onClick={handleFillUserDemo}
+              type="button"
+              className="btn btn-secondary"
+              style={{ fontSize: '0.8rem', padding: '0.5rem', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.3)' }}
+            >
+              👤 Fill Normal User Account (user@example.com)
             </button>
           </div>
         )}
