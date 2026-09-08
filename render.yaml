@@ -1,0 +1,42 @@
+services:
+  # Backend FastAPI Web Service
+  - type: web
+    name: customer-backend
+    env: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    region: oregon
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: customer-postgres-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "1440"
+
+  # Frontend Next.js Web Service
+  - type: web
+    name: customer-frontend
+    env: docker
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    region: oregon
+    plan: free
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: customer-backend
+          property: url
+
+databases:
+  - name: customer-postgres-db
+    databaseName: customer_db
+    user: postgres
+    region: oregon
+    plan: free
