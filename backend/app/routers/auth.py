@@ -1,6 +1,9 @@
 from datetime import timedelta
+# pyrefly: ignore [missing-import]
 from fastapi import APIRouter, Depends, HTTPException, status
+# pyrefly: ignore [missing-import]
 from sqlalchemy.orm import Session
+# pyrefly: ignore [missing-import]
 from sqlalchemy import func
 
 from app.database import get_db
@@ -20,7 +23,7 @@ def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="An Admin user account with this email address already exists."
+            detail="A user account with this email address already exists."
         )
     
     hashed_pwd = get_password_hash(user_in.password)
@@ -51,7 +54,7 @@ def login_for_access_token(user_credentials: UserLogin, db: Session = Depends(ge
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Inactive Admin account. Contact system administrator."
+            detail="Inactive account. Please contact system administrator."
         )
 
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)

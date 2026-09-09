@@ -19,8 +19,8 @@ def get_customers(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """List all customers with full-text search, status filter, and pagination (Admin Only)"""
-    query = db.query(Customer)
+    """List all customers owned by the authenticated user with search, status filter, and pagination."""
+    query = db.query(Customer).filter(Customer.owner_id == current_user.id)
 
     # Filter by search string across fields
     if search and search.strip():
@@ -57,14 +57,17 @@ def get_customer_by_id(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Retrieve detailed customer record by ID (Admin Only)"""
+    """Retrieve detailed customer record by ID owned by the authenticated user."""
     if customer_id <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid customer ID. Must be a positive integer."
         )
 
-    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    customer = db.query(Customer).filter(
+        Customer.id == customer_id,
+        Customer.owner_id == current_user.id
+    ).first()
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -80,15 +83,18 @@ def create_customer(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Create a new customer record (Admin Only)"""
+    """Create a new customer record tied to the authenticated user."""
     email_clean = customer_in.email.strip().lower()
 
-    # Case-insensitive duplicate check for customer email
-    existing = db.query(Customer).filter(func.lower(Customer.email) == email_clean).first()
+    # Case-insensitive duplicate check for customer email under the authenticated user
+    existing = db.query(Customer).filter(
+        Customer.owner_id == current_user.id,
+        func.lower(Customer.email) == email_clean
+    ).first()
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"A customer with the email address '{email_clean}' already exists."
+            detail=f"A customer with the email address '{email_clean}' already exists in your account."
         )
 
     customer_data = customer_in.model_dump()
@@ -111,14 +117,17 @@ def update_customer(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Update an existing customer record (Admin Only)"""
+    """Update an existing customer record owned by the authenticated user."""
     if customer_id <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid customer ID. Must be a positive integer."
         )
 
-    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    customer = db.query(Customer).filter(
+        Customer.id == customer_id,
+        Customer.owner_id == current_user.id
+    ).first()
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -127,15 +136,18 @@ def update_customer(
 
     update_data = customer_in.model_dump(exclude_unset=True)
 
-    # Check for email duplicate if email is being modified
+    # Check for email duplicate under the authenticated user if email is being modified
     if "email" in update_data and update_data["email"]:
         new_email = update_data["email"].strip().lower()
         if new_email != customer.email.lower():
-            existing = db.query(Customer).filter(func.lower(Customer.email) == new_email).first()
+            existing = db.query(Customer).filter(
+                Customer.owner_id == current_user.id,
+                func.lower(Customer.email) == new_email
+            ).first()
             if existing and existing.id != customer_id:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail=f"A customer with the email address '{new_email}' already exists."
+                    detail=f"A customer with the email address '{new_email}' already exists in your account."
                 )
         update_data["email"] = new_email
 
@@ -153,14 +165,17 @@ def delete_customer(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Delete a customer record (Admin Only)"""
+    """Delete a customer record owned by the authenticated user."""
     if customer_id <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid customer ID. Must be a positive integer."
         )
 
-    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    customer = db.query(Customer).filter(
+        Customer.id == customer_id,
+        Customer.owner_id == current_user.id
+    ).first()
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

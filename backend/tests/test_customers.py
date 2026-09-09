@@ -1,5 +1,7 @@
 import uuid
+# pyrefly: ignore [missing-import]
 import pytest
+# pyrefly: ignore [missing-import]
 from fastapi.testclient import TestClient
 from app.main import app
 
@@ -201,3 +203,82 @@ def test_delete_customer_success(auth_headers):
 def test_delete_customer_not_found(auth_headers):
     response = client.delete("/api/customers/999999", headers=auth_headers)
     assert response.status_code == 404
+
+
+# Data Isolation & Security Verification Tests
+def test_newly_registered_user_starts_with_clean_data():
+    """Verify that a brand new user starts with 0 customers."""
+    new_user_email = f"clean_user_{uuid.uuid4().hex[:8]}@example.com"
+    client.post("/api/auth/register", json={
+        "email": new_user_email,
+        "full_name": "Clean Slate User",
+        "password": "cleanpassword123"
+    })
+    login_res = client.post("/api/auth/login", json={
+        "email": new_user_email,
+        "password": "cleanpassword123"
+    })
+    token = login_res.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    res = client.get("/api/customers", headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["total"] == 0
+    assert data["items"] == []
+
+
+def test_multi_user_data_isolation():
+    """Verify that User A cannot see, access, modify, or delete User B's customers."""
+    # Register & login User A
+    user_a_email = f"user_a_{uuid.uuid4().hex[:8]}@example.com"
+    client.post("/api/auth/register", json={
+        "email": user_a_email,
+        "full_name": "User Alpha",
+        "password": "userapassword123"
+    })
+    token_a = client.post("/api/auth/login", json={"email": user_a_email, "password": "userapassword123"}).json()["access_token"]
+    headers_a = {"Authorization": f"Bearer {token_a}"}
+
+    # Register & login User B
+    user_b_email = f"user_b_{uuid.uuid4().hex[:8]}@example.com"
+    client.post("/api/auth/register", json={
+        "email": user_b_email,
+        "full_name": "User Beta",
+        "password": "userbpassword123"
+    })
+    token_b = client.post("/api/auth/login", json={"email": user_b_email, "password": "userbpassword123"}).json()["access_token"]
+    headers_b = {"Authorization": f"Bearer {token_b}"}
+
+    # User A creates a customer
+    create_res = client.post("/api/customers", json={
+        "name": "Alpha Confidential Customer",
+        "email": f"secret_{uuid.uuid4().hex[:8]}@alpha.com",
+        "company": "Alpha Corp",
+        "status": "Active"
+    }, headers=headers_a)
+    assert create_res.status_code == 201
+    cust_a_id = create_res.json()["id"]
+
+    # 1. User B lists customers -> User A's customer must NOT be listed
+    list_b_res = client.get("/api/customers", headers=headers_b)
+    assert list_b_res.status_code == 200
+    items_b = list_b_res.json()["items"]
+    assert not any(c["id"] == cust_a_id for c in items_b)
+
+    # 2. User B GET customer by ID -> 404 Not Found
+    get_b_res = client.get(f"/api/customers/{cust_a_id}", headers=headers_b)
+    assert get_b_res.status_code == 404
+
+    # 3. User B PUT update customer -> 404 Not Found
+    put_b_res = client.put(f"/api/customers/{cust_a_id}", json={"name": "Hacked by User B"}, headers=headers_b)
+    assert put_b_res.status_code == 404
+
+    # 4. User B DELETE customer -> 404 Not Found
+    del_b_res = client.delete(f"/api/customers/{cust_a_id}", headers=headers_b)
+    assert del_b_res.status_code == 404
+
+    # 5. User A verifies data is intact
+    get_a_res = client.get(f"/api/customers/{cust_a_id}", headers=headers_a)
+    assert get_a_res.status_code == 200
+    assert get_a_res.json()["name"] == "Alpha Confidential Customer"

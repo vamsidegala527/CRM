@@ -16,13 +16,6 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  const handleFillAdminDemo = () => {
-    setEmail('admin@example.com');
-    setPassword('admin123');
-    setIsRegister(false);
-    setError(null);
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -86,10 +79,10 @@ export default function LoginPage() {
             CM
           </div>
           <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--text-main)', margin: '0 0 0.5rem' }}>
-            {isRegister ? 'Create Admin Account' : 'Admin Sign In'}
+            {isRegister ? 'Create Account' : 'Sign In'}
           </h2>
           <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-            {isRegister ? 'Register to access Customer Management Portal' : 'Sign in to access full customer management privileges'}
+            {isRegister ? 'Register to manage your isolated customer database' : 'Sign in to access your customer records'}
           </p>
         </div>
 
@@ -131,7 +124,7 @@ export default function LoginPage() {
               <input
                 type="text"
                 className="form-control"
-                placeholder="e.g. System Administrator"
+                placeholder="e.g. Alex Morgan"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 required
@@ -144,7 +137,7 @@ export default function LoginPage() {
             <input
               type="email"
               className="form-control"
-              placeholder="e.g. admin@example.com"
+              placeholder="e.g. user@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
@@ -172,20 +165,6 @@ export default function LoginPage() {
             {loading ? (isRegister ? 'Creating Account...' : 'Signing In...') : (isRegister ? 'Register' : 'Sign In')}
           </button>
         </form>
-
-        {/* Quick Demo Credentials Presets */}
-        {!isRegister && (
-          <div style={{ marginTop: '1.25rem' }}>
-            <button
-              onClick={handleFillAdminDemo}
-              type="button"
-              className="btn btn-secondary"
-              style={{ width: '100%', fontSize: '0.8rem', padding: '0.5rem', background: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.3)' }}
-            >
-              👑 Fill Admin Credentials (admin@example.com)
-            </button>
-          </div>
-        )}
 
         {/* Toggle Mode */}
         <div style={{

@@ -150,7 +150,7 @@ export default function DashboardPage() {
         justifyContent: 'center',
         color: 'var(--text-muted)'
       }}>
-        Verifying Admin Credentials...
+        Loading account...
       </div>
     );
   }
