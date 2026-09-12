@@ -2,12 +2,6 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { streamText, tool, stepCountIs } from 'ai';
 import { z } from 'zod';
 
-const google = createGoogleGenerativeAI({
-  apiKey: process.env.GEMINI_API_KEY || '',
-});
-
-const API_BASE_URL = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-
 function sanitizeMessages(rawMessages: any[]): any[] {
   if (!Array.isArray(rawMessages)) return [];
   const sanitized: any[] = [];
@@ -114,21 +108,47 @@ export async function POST(req: Request) {
       });
     }
 
-    const fetchBackend = async (endpoint: string, options: RequestInit = {}) => {
-      const res = await fetch(`${API_BASE_URL}${endpoint}`, {
-        ...options,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': authHeader,
-          ...(options.headers as Record<string, string> || {}),
-        },
-      });
+    const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+    if (!apiKey) {
+      return new Response(
+        JSON.stringify({
+          error: 'Google Gemini API key is not configured. Please add GEMINI_API_KEY to your Render environment variables (Render Dashboard > customer-frontend > Environment).'
+        }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data.detail || `Backend API error: ${res.statusText}`);
+    const google = createGoogleGenerativeAI({
+      apiKey,
+    });
+
+    const backendBase = (
+      process.env.INTERNAL_API_URL ||
+      process.env.NEXT_PUBLIC_API_URL ||
+      'http://localhost:8000'
+    ).replace(/\/+$/, '');
+
+    const fetchBackend = async (endpoint: string, options: RequestInit = {}) => {
+      const url = `${backendBase}${endpoint}`;
+      try {
+        const res = await fetch(url, {
+          ...options,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': authHeader,
+            ...(options.headers as Record<string, string> || {}),
+          },
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.detail || `Backend API error: ${res.statusText}`);
+        }
+        return data;
+      } catch (err: any) {
+        console.error(`[fetchBackend error on ${url}]:`, err);
+        throw err;
       }
-      return data;
     };
 
     const result = streamText({
@@ -277,7 +297,16 @@ CRITICAL BEHAVIOR & RULES:
     } as any);
 
     const formatStreamError = (error: any) => {
+      console.error('[formatStreamError caught]:', error);
       const msg = error?.message || String(error || '');
+      if (
+        msg.includes('API key') ||
+        msg.includes('API_KEY') ||
+        msg.includes('unregistered callers') ||
+        msg.includes('consumer identity')
+      ) {
+        return 'Google Gemini API key is missing or invalid. Please add GEMINI_API_KEY to your Render deployment dashboard (customer-frontend > Environment).';
+      }
       if (
         msg.includes('quota') ||
         msg.includes('Quota') ||
@@ -287,10 +316,13 @@ CRITICAL BEHAVIOR & RULES:
       ) {
         return 'Google Gemini API quota limit reached. Please wait a brief moment before sending another message.';
       }
-      if (msg.includes('Unauthorized') || msg.includes('token')) {
+      if (msg.includes('Unauthorized') || msg.includes('token') || msg.includes('Not authenticated')) {
         return 'Authentication token missing or expired. Please sign in again.';
       }
-      return 'The AI assistant encountered a processing error. Please try again.';
+      if (msg.includes('ECONNREFUSED') || msg.includes('fetchBackend error') || msg.includes('Failed to fetch')) {
+        return 'The AI assistant was unable to communicate with the backend database. Please verify the backend service is running.';
+      }
+      return `AI assistant error: ${msg || 'Please try again.'}`;
     };
 
     return typeof (result as any).toUIMessageStreamResponse === 'function'
