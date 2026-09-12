@@ -4,7 +4,19 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export function getAuthToken(): string | null {
   if (typeof window !== 'undefined') {
-    return localStorage.getItem('access_token');
+    const token = localStorage.getItem('access_token');
+    if (token && token !== 'null' && token !== 'undefined' && token !== 'Bearer null') {
+      return token;
+    }
+    
+    // Cookie fallback
+    const match = document.cookie.match(/(?:^|; )access_token=([^;]*)/);
+    if (match) {
+      const val = decodeURIComponent(match[1]);
+      if (val && val !== 'null' && val !== 'undefined') {
+        return val;
+      }
+    }
   }
   return null;
 }
@@ -12,6 +24,8 @@ export function getAuthToken(): string | null {
 export function setAuthToken(token: string): void {
   if (typeof window !== 'undefined') {
     localStorage.setItem('access_token', token);
+    const secureFlag = window.location.protocol === 'https:' ? '; Secure' : '';
+    document.cookie = `access_token=${token}; path=/; max-age=86400; SameSite=Lax${secureFlag}`;
   }
 }
 
@@ -19,6 +33,8 @@ export function removeAuthToken(): void {
   if (typeof window !== 'undefined') {
     localStorage.removeItem('access_token');
     localStorage.removeItem('user_info');
+    const secureFlag = window.location.protocol === 'https:' ? '; Secure' : '';
+    document.cookie = `access_token=; path=/; max-age=0; SameSite=Lax${secureFlag}`;
   }
 }
 
@@ -89,6 +105,16 @@ export const api = {
     const res = await request<AuthResponse>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify(credentials),
+    });
+    setAuthToken(res.access_token);
+    setStoredUser(res.user);
+    return res;
+  },
+
+  async googleAuth(idToken: string): Promise<AuthResponse> {
+    const res = await request<AuthResponse>('/api/auth/google', {
+      method: 'POST',
+      body: JSON.stringify({ id_token: idToken }),
     });
     setAuthToken(res.access_token);
     setStoredUser(res.user);

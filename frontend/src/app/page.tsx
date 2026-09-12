@@ -9,6 +9,7 @@ import CustomerList from '../components/CustomerList';
 import CustomerModal from '../components/CustomerModal';
 import CustomerDetailModal from '../components/CustomerDetailModal';
 import DeleteConfirmModal from '../components/DeleteConfirmModal';
+import ChatbotWidget from '../components/ChatbotWidget';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -311,6 +312,9 @@ export default function DashboardPage() {
         customer={selectedCustomerForDelete}
         isDeleting={isDeleting}
       />
+
+      {/* Floating AI Assistant Chatbot */}
+      <ChatbotWidget onCustomerChange={fetchCustomers} />
     </div>
   );
 }

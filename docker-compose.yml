@@ -38,10 +38,14 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: 64576092611-tlgd7s6jcubbtmk94ho741tjebvjdtbo.apps.googleusercontent.com
     container_name: customer_frontend_container
     restart: always
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_GOOGLE_CLIENT_ID=64576092611-tlgd7s6jcubbtmk94ho741tjebvjdtbo.apps.googleusercontent.com
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - INTERNAL_API_URL=http://backend:8000
     ports:
       - "3000:3000"
     depends_on:

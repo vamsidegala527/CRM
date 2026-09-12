@@ -1,8 +1,15 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import Script from 'next/script';
 import { api } from '../../lib/api';
+
+declare global {
+  interface Window {
+    google?: any;
+  }
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -15,6 +22,65 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  const [gisLoaded, setGisLoaded] = useState(false);
+
+  const handleGoogleCallback = useCallback(async (response: any) => {
+    try {
+      if (response && response.credential) {
+        setLoading(true);
+        setError(null);
+        await api.googleAuth(response.credential);
+        router.push('/');
+      } else {
+        setError('Google authentication did not return a valid credential.');
+      }
+    } catch (err: any) {
+      console.error('[Google GIS] Auth error:', err);
+      setError(err.message || 'An error occurred during Google authentication.');
+    } finally {
+      setLoading(false);
+    }
+  }, [router]);
+
+  const renderGoogleButton = useCallback(() => {
+    const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '64576092611-tlgd7s6jcubbtmk94ho741tjebvjdtbo.apps.googleusercontent.com';
+    if (!googleClientId) {
+      console.warn('[Google GIS] NEXT_PUBLIC_GOOGLE_CLIENT_ID is not configured.');
+      return;
+    }
+
+    if (typeof window !== 'undefined' && window.google?.accounts?.id) {
+      const container = document.getElementById('googleSignInBtn');
+      if (container) {
+        container.innerHTML = '';
+        window.google.accounts.id.initialize({
+          client_id: googleClientId,
+          callback: handleGoogleCallback,
+        });
+
+        window.google.accounts.id.renderButton(container, {
+          theme: 'outline',
+          size: 'large',
+          width: 376,
+          shape: 'rectangular',
+          text: isRegister ? 'signup_with' : 'signin_with',
+        });
+      }
+    }
+  }, [isRegister, handleGoogleCallback]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.google?.accounts?.id) {
+      setGisLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (gisLoaded) {
+      renderGoogleButton();
+    }
+  }, [gisLoaded, isRegister, renderGoogleButton]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,6 +119,14 @@ export default function LoginPage() {
       padding: '1.5rem',
       position: 'relative'
     }}>
+      <Script
+        src="https://accounts.google.com/gsi/client"
+        strategy="afterInteractive"
+        onLoad={() => {
+          setGisLoaded(true);
+        }}
+      />
+
       <div className="glass-panel" style={{
         width: '100%',
         maxWidth: '440px',
@@ -165,6 +239,26 @@ export default function LoginPage() {
             {loading ? (isRegister ? 'Creating Account...' : 'Signing In...') : (isRegister ? 'Register' : 'Sign In')}
           </button>
         </form>
+
+        {/* OR Separator & Google Sign-In Container */}
+        <div style={{ marginTop: '1.25rem' }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            margin: '1.25rem 0',
+            color: 'var(--text-muted)',
+            fontSize: '0.8rem'
+          }}>
+            <div style={{ flex: 1, height: '1px', background: 'var(--border-color)' }} />
+            <span style={{ padding: '0 0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>OR</span>
+            <div style={{ flex: 1, height: '1px', background: 'var(--border-color)' }} />
+          </div>
+
+          <div
+            id="googleSignInBtn"
+            style={{ display: 'flex', justifyContent: 'center', minHeight: '44px', width: '100%' }}
+          />
+        </div>
 
         {/* Toggle Mode */}
         <div style={{

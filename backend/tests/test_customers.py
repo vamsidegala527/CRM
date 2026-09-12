@@ -38,7 +38,7 @@ def test_create_customer_success(auth_headers):
         "phone": "+1 (555) 998-1122",
         "company": "  Transylvania Real Estate  ",
         "address": "45 Castle Way, Bran, Romania",
-        "status": "active",
+        "status": "Active Customer",
         "notes": "  High priority client.  "
     }
     response = client.post("/api/customers", json=payload, headers=auth_headers)
@@ -105,12 +105,14 @@ def test_get_customers_list(auth_headers):
 
 
 def test_get_customers_search_filter(auth_headers):
-    unique_name = f"SearchTarget_{uuid.uuid4().hex[:6]}"
-    client.post("/api/customers", json={
+    letters_only = "".join(c for c in uuid.uuid4().hex if c.isalpha())[:6]
+    unique_name = f"SearchTarget{letters_only}"
+    create_res = client.post("/api/customers", json={
         "name": unique_name,
         "email": f"search_{uuid.uuid4().hex[:8]}@example.com",
         "status": "Active"
     }, headers=auth_headers)
+    assert create_res.status_code == 201
 
     response = client.get(f"/api/customers?search={unique_name}", headers=auth_headers)
     assert response.status_code == 200
@@ -230,7 +232,6 @@ def test_newly_registered_user_starts_with_clean_data():
 
 def test_multi_user_data_isolation():
     """Verify that User A cannot see, access, modify, or delete User B's customers."""
-    # Register & login User A
     user_a_email = f"user_a_{uuid.uuid4().hex[:8]}@example.com"
     client.post("/api/auth/register", json={
         "email": user_a_email,
@@ -240,7 +241,6 @@ def test_multi_user_data_isolation():
     token_a = client.post("/api/auth/login", json={"email": user_a_email, "password": "userapassword123"}).json()["access_token"]
     headers_a = {"Authorization": f"Bearer {token_a}"}
 
-    # Register & login User B
     user_b_email = f"user_b_{uuid.uuid4().hex[:8]}@example.com"
     client.post("/api/auth/register", json={
         "email": user_b_email,
@@ -250,7 +250,6 @@ def test_multi_user_data_isolation():
     token_b = client.post("/api/auth/login", json={"email": user_b_email, "password": "userbpassword123"}).json()["access_token"]
     headers_b = {"Authorization": f"Bearer {token_b}"}
 
-    # User A creates a customer
     create_res = client.post("/api/customers", json={
         "name": "Alpha Confidential Customer",
         "email": f"secret_{uuid.uuid4().hex[:8]}@alpha.com",
@@ -260,25 +259,137 @@ def test_multi_user_data_isolation():
     assert create_res.status_code == 201
     cust_a_id = create_res.json()["id"]
 
-    # 1. User B lists customers -> User A's customer must NOT be listed
     list_b_res = client.get("/api/customers", headers=headers_b)
     assert list_b_res.status_code == 200
     items_b = list_b_res.json()["items"]
     assert not any(c["id"] == cust_a_id for c in items_b)
 
-    # 2. User B GET customer by ID -> 404 Not Found
     get_b_res = client.get(f"/api/customers/{cust_a_id}", headers=headers_b)
     assert get_b_res.status_code == 404
 
-    # 3. User B PUT update customer -> 404 Not Found
     put_b_res = client.put(f"/api/customers/{cust_a_id}", json={"name": "Hacked by User B"}, headers=headers_b)
     assert put_b_res.status_code == 404
 
-    # 4. User B DELETE customer -> 404 Not Found
     del_b_res = client.delete(f"/api/customers/{cust_a_id}", headers=headers_b)
     assert del_b_res.status_code == 404
 
-    # 5. User A verifies data is intact
     get_a_res = client.get(f"/api/customers/{cust_a_id}", headers=headers_a)
     assert get_a_res.status_code == 200
     assert get_a_res.json()["name"] == "Alpha Confidential Customer"
+
+
+# Comprehensive Form Input Validation Tests
+def test_validation_invalid_name_symbols_and_numbers(auth_headers):
+    """Verify full name with numbers/symbols is rejected with 422."""
+    res = client.post("/api/customers", json={
+        "name": "Jane Doe 123!",
+        "email": f"val_name_{uuid.uuid4().hex[:8]}@example.com"
+    }, headers=auth_headers)
+    assert res.status_code == 422
+    assert "only contain letters" in str(res.json()).lower()
+
+
+def test_validation_invalid_name_too_short(auth_headers):
+    """Verify single-letter or whitespace name is rejected."""
+    res = client.post("/api/customers", json={
+        "name": " J ",
+        "email": f"val_shortname_{uuid.uuid4().hex[:8]}@example.com"
+    }, headers=auth_headers)
+    assert res.status_code == 422
+
+
+def test_validation_invalid_name_too_long(auth_headers):
+    """Verify name > 100 characters is rejected."""
+    long_name = "A" * 101
+    res = client.post("/api/customers", json={
+        "name": long_name,
+        "email": f"val_longname_{uuid.uuid4().hex[:8]}@example.com"
+    }, headers=auth_headers)
+    assert res.status_code == 422
+
+
+def test_validation_invalid_email_format(auth_headers):
+    """Verify bad email format is rejected."""
+    res = client.post("/api/customers", json={
+        "name": "Valid Name",
+        "email": "notanemailaddress"
+    }, headers=auth_headers)
+    assert res.status_code == 422
+
+
+def test_validation_invalid_phone_characters(auth_headers):
+    """Verify phone with letters or invalid characters is rejected."""
+    res = client.post("/api/customers", json={
+        "name": "Valid Name",
+        "email": f"val_phone_{uuid.uuid4().hex[:8]}@example.com",
+        "phone": "+1 (555) CALL-NOW"
+    }, headers=auth_headers)
+    assert res.status_code == 422
+
+
+def test_validation_invalid_phone_too_few_digits(auth_headers):
+    """Verify phone with fewer than 7 digits is rejected."""
+    res = client.post("/api/customers", json={
+        "name": "Valid Name",
+        "email": f"val_shortphone_{uuid.uuid4().hex[:8]}@example.com",
+        "phone": "12345"
+    }, headers=auth_headers)
+    assert res.status_code == 422
+
+
+def test_validation_status_label_normalization(auth_headers):
+    """Verify 'Sales Lead' and 'Active Customer' map correctly to Lead and Active."""
+    res = client.post("/api/customers", json={
+        "name": "Lead Customer",
+        "email": f"val_lead_{uuid.uuid4().hex[:8]}@example.com",
+        "status": "Sales Lead"
+    }, headers=auth_headers)
+    assert res.status_code == 201
+    assert res.json()["status"] == "Lead"
+
+
+def test_validation_over_length_optional_fields(auth_headers):
+    """Verify over-length company (>100), address (>300), notes (>1000) are rejected."""
+    res_company = client.post("/api/customers", json={
+        "name": "Valid Name",
+        "email": f"val_company_{uuid.uuid4().hex[:8]}@example.com",
+        "company": "C" * 101
+    }, headers=auth_headers)
+    assert res_company.status_code == 422
+
+    res_address = client.post("/api/customers", json={
+        "name": "Valid Name",
+        "email": f"val_addr_{uuid.uuid4().hex[:8]}@example.com",
+        "address": "A" * 301
+    }, headers=auth_headers)
+    assert res_address.status_code == 422
+
+    res_notes = client.post("/api/customers", json={
+        "name": "Valid Name",
+        "email": f"val_notes_{uuid.uuid4().hex[:8]}@example.com",
+        "notes": "N" * 1001
+    }, headers=auth_headers)
+    assert res_notes.status_code == 422
+
+
+def test_validation_boundary_values(auth_headers):
+    """Verify exact boundary values (2 char name, 100 char name, 7-digit phone, 15-digit phone)."""
+    # Min length name (2 chars) & min digits phone (7 digits)
+    res_min = client.post("/api/customers", json={
+        "name": "Ab",
+        "email": f"val_bound_min_{uuid.uuid4().hex[:8]}@example.com",
+        "phone": "1234567"
+    }, headers=auth_headers)
+    assert res_min.status_code == 201
+    assert res_min.json()["name"] == "Ab"
+    assert res_min.json()["phone"] == "1234567"
+
+    # Max length name (100 chars) & max digits phone (15 digits)
+    max_name = "A" * 100
+    res_max = client.post("/api/customers", json={
+        "name": max_name,
+        "email": f"val_bound_max_{uuid.uuid4().hex[:8]}@example.com",
+        "phone": "+1 (555) 123-456789"
+    }, headers=auth_headers)
+    assert res_max.status_code == 201
+    assert res_max.json()["name"] == max_name

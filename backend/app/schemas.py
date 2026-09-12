@@ -4,7 +4,17 @@ from datetime import datetime
 from pydantic import BaseModel, EmailStr, field_validator, Field, ConfigDict
 
 VALID_STATUSES = {"Active", "Lead", "Prospect", "Inactive"}
-PHONE_REGEX = re.compile(r"^\+?[0-9\s\-\(\)\.]{7,20}$")
+STATUS_MAP = {
+    "ACTIVE CUSTOMER": "Active",
+    "SALES LEAD": "Lead",
+    "PROSPECT": "Prospect",
+    "INACTIVE": "Inactive",
+    "ACTIVE": "Active",
+    "LEAD": "Lead",
+}
+
+NAME_REGEX = re.compile(r"^[a-zA-Z\s\-\'\.\,]+$")
+PHONE_REGEX = re.compile(r"^\+?[0-9\s\-\(\)\.]{7,25}$")
 
 def validate_phone_number(v: Optional[str]) -> Optional[str]:
     if v is None:
@@ -19,6 +29,31 @@ def validate_phone_number(v: Optional[str]) -> Optional[str]:
         raise ValueError(f"Phone number must contain between 7 and 15 digits (found {len(digits)}).")
     return v
 
+def validate_name_string(v: str) -> str:
+    if not isinstance(v, str):
+        raise ValueError("Name must be a string.")
+    v = v.strip()
+    if not v:
+        raise ValueError("Name cannot be empty or contain only whitespace.")
+    if len(v) < 2:
+        raise ValueError("Name must be at least 2 characters long.")
+    if len(v) > 100:
+        raise ValueError("Name cannot exceed 100 characters.")
+    if not NAME_REGEX.match(v):
+        raise ValueError("Name can only contain letters, spaces, hyphens, apostrophes, periods, and commas.")
+    return v
+
+def normalize_status(v: Optional[str]) -> str:
+    if not v or not v.strip():
+        return "Active"
+    clean = v.strip().upper()
+    if clean in STATUS_MAP:
+        return STATUS_MAP[clean]
+    cap = v.strip().capitalize()
+    if cap in VALID_STATUSES:
+        return cap
+    raise ValueError(f"Invalid status '{v}'. Allowed values: Active Customer, Sales Lead, Prospect, Inactive.")
+
 # User Schemas
 class UserBase(BaseModel):
     email: EmailStr
@@ -31,16 +66,14 @@ class UserBase(BaseModel):
             v = v.strip().lower()
             if not v:
                 raise ValueError("Email cannot be empty.")
+            if len(v) > 255:
+                raise ValueError("Email address cannot exceed 255 characters.")
         return v
 
     @field_validator("full_name", mode="before")
     @classmethod
     def clean_full_name(cls, v: str) -> str:
-        if isinstance(v, str):
-            v = v.strip()
-            if len(v) < 2:
-                raise ValueError("Full name must be at least 2 characters long.")
-        return v
+        return validate_name_string(v)
 
 class UserCreate(UserBase):
     password: str = Field(..., min_length=6, max_length=72)
@@ -66,10 +99,15 @@ class UserLogin(BaseModel):
             return v.strip().lower()
         return v
 
+class GoogleAuthRequest(BaseModel):
+    id_token: str
+
 class UserResponse(UserBase):
     id: int
     is_active: bool
     created_at: datetime
+    google_id: Optional[str] = None
+    auth_provider: Optional[str] = "email"
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -98,24 +136,50 @@ class CustomerBase(BaseModel):
         if isinstance(v, str):
             v = v.strip().lower()
             if not v:
-                raise ValueError("Customer email cannot be empty.")
+                raise ValueError("Customer email address cannot be empty.")
+            if len(v) > 255:
+                raise ValueError("Email address cannot exceed 255 characters.")
         return v
 
     @field_validator("name", mode="before")
     @classmethod
     def clean_name(cls, v: str) -> str:
+        return validate_name_string(v)
+
+    @field_validator("company", mode="before")
+    @classmethod
+    def clean_company(cls, v: Optional[str]) -> Optional[str]:
         if isinstance(v, str):
             v = v.strip()
-            if len(v) < 2:
-                raise ValueError("Customer name must be at least 2 characters long.")
+            if not v:
+                return None
+            if len(v) > 100:
+                raise ValueError("Company name cannot exceed 100 characters.")
+            return v
         return v
 
-    @field_validator("company", "address", "notes", mode="before")
+    @field_validator("address", mode="before")
     @classmethod
-    def clean_optional_strings(cls, v: Optional[str]) -> Optional[str]:
+    def clean_address(cls, v: Optional[str]) -> Optional[str]:
         if isinstance(v, str):
             v = v.strip()
-            return v if v else None
+            if not v:
+                return None
+            if len(v) > 300:
+                raise ValueError("Address cannot exceed 300 characters.")
+            return v
+        return v
+
+    @field_validator("notes", mode="before")
+    @classmethod
+    def clean_notes(cls, v: Optional[str]) -> Optional[str]:
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return None
+            if len(v) > 1000:
+                raise ValueError("Notes cannot exceed 1000 characters.")
+            return v
         return v
 
     @field_validator("phone", mode="before")
@@ -123,15 +187,10 @@ class CustomerBase(BaseModel):
     def clean_phone(cls, v: Optional[str]) -> Optional[str]:
         return validate_phone_number(v)
 
-    @field_validator("status")
+    @field_validator("status", mode="before")
     @classmethod
     def validate_status(cls, v: Optional[str]) -> str:
-        if not v:
-            return "Active"
-        v = v.strip().capitalize()
-        if v not in VALID_STATUSES:
-            raise ValueError(f"Invalid status '{v}'. Allowed values: {', '.join(sorted(VALID_STATUSES))}.")
-        return v
+        return normalize_status(v)
 
 class CustomerCreate(CustomerBase):
     pass
@@ -150,7 +209,11 @@ class CustomerUpdate(BaseModel):
     def clean_email(cls, v: Optional[str]) -> Optional[str]:
         if isinstance(v, str):
             v = v.strip().lower()
-            return v if v else None
+            if not v:
+                return None
+            if len(v) > 255:
+                raise ValueError("Email address cannot exceed 255 characters.")
+            return v
         return v
 
     @field_validator("name", mode="before")
@@ -158,17 +221,45 @@ class CustomerUpdate(BaseModel):
     def clean_name(cls, v: Optional[str]) -> Optional[str]:
         if isinstance(v, str):
             v = v.strip()
-            if v and len(v) < 2:
-                raise ValueError("Customer name must be at least 2 characters long.")
-            return v if v else None
+            if not v:
+                return None
+            return validate_name_string(v)
         return v
 
-    @field_validator("company", "address", "notes", mode="before")
+    @field_validator("company", mode="before")
     @classmethod
-    def clean_optional_strings(cls, v: Optional[str]) -> Optional[str]:
+    def clean_company(cls, v: Optional[str]) -> Optional[str]:
         if isinstance(v, str):
             v = v.strip()
-            return v if v else None
+            if not v:
+                return None
+            if len(v) > 100:
+                raise ValueError("Company name cannot exceed 100 characters.")
+            return v
+        return v
+
+    @field_validator("address", mode="before")
+    @classmethod
+    def clean_address(cls, v: Optional[str]) -> Optional[str]:
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return None
+            if len(v) > 300:
+                raise ValueError("Address cannot exceed 300 characters.")
+            return v
+        return v
+
+    @field_validator("notes", mode="before")
+    @classmethod
+    def clean_notes(cls, v: Optional[str]) -> Optional[str]:
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return None
+            if len(v) > 1000:
+                raise ValueError("Notes cannot exceed 1000 characters.")
+            return v
         return v
 
     @field_validator("phone", mode="before")
@@ -176,15 +267,12 @@ class CustomerUpdate(BaseModel):
     def clean_phone(cls, v: Optional[str]) -> Optional[str]:
         return validate_phone_number(v)
 
-    @field_validator("status")
+    @field_validator("status", mode="before")
     @classmethod
     def validate_status(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
+        if v is None or (isinstance(v, str) and not v.strip()):
             return None
-        v = v.strip().capitalize()
-        if v not in VALID_STATUSES:
-            raise ValueError(f"Invalid status '{v}'. Allowed values: {', '.join(sorted(VALID_STATUSES))}.")
-        return v
+        return normalize_status(v)
 
 class CustomerResponse(CustomerBase):
     id: int

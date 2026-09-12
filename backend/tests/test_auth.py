@@ -1,5 +1,7 @@
 import uuid
+# pyrefly: ignore [missing-import]
 import pytest
+# pyrefly: ignore [missing-import]
 from fastapi.testclient import TestClient
 from app.main import app
 
@@ -89,3 +91,58 @@ def test_login_nonexistent_user():
 def test_protected_route_unauthorized():
     response = client.get("/api/auth/me")
     assert response.status_code == 401
+
+def test_google_auth_new_user_creation(mocker=None):
+    from unittest.mock import patch
+    g_id = f"google_id_{uuid.uuid4().hex[:8]}"
+    g_email = f"google_{uuid.uuid4().hex[:8]}@example.com"
+    
+    mock_id_info = {
+        "sub": g_id,
+        "email": g_email,
+        "email_verified": True,
+        "name": "Google Test User"
+    }
+
+    with patch("app.routers.auth.id_token.verify_oauth2_token", return_value=mock_id_info):
+        response = client.post("/api/auth/google", json={"id_token": "mock_valid_google_token"})
+        assert response.status_code == 200
+        data = response.json()
+        assert "access_token" in data
+        assert data["user"]["email"] == g_email
+        assert data["user"]["google_id"] == g_id
+        assert data["user"]["auth_provider"] == "google"
+
+def test_google_auth_account_linking():
+    from unittest.mock import patch
+    shared_email = f"shared_{uuid.uuid4().hex[:8]}@example.com"
+    # Step 1: Create email user
+    reg_res = client.post("/api/auth/register", json={
+        "email": shared_email,
+        "full_name": "Standard User",
+        "password": "password123"
+    })
+    assert reg_res.status_code == 201
+
+    g_id = f"google_link_{uuid.uuid4().hex[:8]}"
+    mock_id_info = {
+        "sub": g_id,
+        "email": shared_email.upper(),
+        "email_verified": True,
+        "name": "Standard User Google"
+    }
+
+    # Step 2: Sign in with Google using same email
+    with patch("app.routers.auth.id_token.verify_oauth2_token", return_value=mock_id_info):
+        response = client.post("/api/auth/google", json={"id_token": "mock_token_for_linking"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["user"]["email"] == shared_email
+        assert data["user"]["google_id"] == g_id
+
+def test_google_auth_invalid_token():
+    from unittest.mock import patch
+    with patch("app.routers.auth.id_token.verify_oauth2_token", side_effect=ValueError("Token invalid")):
+        response = client.post("/api/auth/google", json={"id_token": "invalid_token"})
+        assert response.status_code == 401
+        assert "Invalid or expired Google ID token" in response.json()["detail"]
