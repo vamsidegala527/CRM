@@ -125,7 +125,8 @@ export async function POST(req: Request) {
     let modelInstance: any;
     if (groqKey) {
       const groq = createGroq({ apiKey: groqKey });
-      modelInstance = groq('llama-3.3-70b-versatile');
+      const groqModelName = process.env.GROQ_MODEL || 'qwen/qwen3.8-27b';
+      modelInstance = groq(groqModelName);
     } else {
       const google = createGoogleGenerativeAI({ apiKey: geminiKey });
       modelInstance = google('gemini-3.6-flash');
@@ -160,23 +161,67 @@ export async function POST(req: Request) {
       }
     };
 
+    const getCustomersSchema = z.object({
+      search: z.string().optional().describe('Search keyword matching name, email, company, or phone'),
+      status: z.string().optional().describe('Filter by status: Active, Lead, Prospect, or Inactive'),
+      page: z.number().optional().default(1),
+      limit: z.number().optional().default(20),
+    });
+
+    const getCustomerSchema = z.object({
+      customerId: z.number().describe('ID of the customer to retrieve'),
+    });
+
+    const createCustomerSchema = z.object({
+      name: z.string().describe('Full name of the customer'),
+      email: z.string().describe('Customer email address'),
+      phone: z.string().optional().describe('Phone number'),
+      company: z.string().optional().describe('Company name'),
+      status: z.enum(['Active', 'Lead', 'Prospect', 'Inactive']).optional().default('Active'),
+      address: z.string().optional().describe('Physical address'),
+      notes: z.string().optional().describe('Internal notes or observations'),
+    });
+
+    const updateCustomerSchema = z.object({
+      customerId: z.number().describe('ID of the customer to update'),
+      name: z.string().optional().describe('New name'),
+      email: z.string().optional().describe('New email address'),
+      phone: z.string().optional().describe('New phone number'),
+      company: z.string().optional().describe('New company name'),
+      status: z.enum(['Active', 'Lead', 'Prospect', 'Inactive']).optional().describe('New status'),
+      address: z.string().optional().describe('New address'),
+      notes: z.string().optional().describe('New notes'),
+    });
+
+    const deleteCustomerSchema = z.object({
+      customerId: z.number().describe('ID of the customer to delete'),
+      customerName: z.string().describe('Name of the customer'),
+      confirmed: z.boolean().describe('Set to true only if the user explicitly confirmed deletion'),
+    });
+
     const result = streamText({
       model: modelInstance,
       system: `You are an intelligent, friendly Customer Management AI Assistant embedded in the Customer Hub application.
-Your mission is to help authenticated users manage their isolated customer database through natural language commands and questions.
+You have direct tool access to live customer data. Help users manage their customer relationships effectively and safely.
 
-CRITICAL BEHAVIOR & RULES:
-1. ALWAYS maintain a professional, helpful, and concise tone.
-2. CREATING CUSTOMERS:
-   - "name" and "email" are MANDATORY fields.
-   - If the user specifies a name but omits the email address (e.g. "Add Rahul as a customer"), DO NOT call createCustomer yet. Ask the user friendly to provide their email address.
-   - Valid status values are: "Active", "Lead", "Prospect", "Inactive". Default is "Active".
-3. READING & SEARCHING CUSTOMERS:
-   - When asked to show, list, count, or find customers, use getCustomers.
-   - For example: "Show my customers", "How many customers do I have?", "Find customers from Acme", "Show inactive customers".
-4. UPDATING CUSTOMERS:
-   - If the user asks to update a customer (e.g., "Change John's phone number to 9999999999"), search for "John" first using getCustomers to find their exact customer ID, then call updateCustomer.
-   - If multiple customers match, ask the user to clarify which customer ID or email they mean.
+CAPABILITIES:
+- View, list, search, filter, and count customers
+- View specific customer details
+- Create new customer records
+- Update existing customer details
+- Delete customer records (with confirmation safety)
+- Provide summaries, insights, and answers about customer statistics
+
+RULES:
+1. ALWAYS use tools when the user asks about their customers or asks you to perform actions. Do not make up fake data.
+2. When creating customers:
+   - "name" and "email" are REQUIRED.
+   - If user didn't provide name or email, ask for them politely instead of guessing.
+   - Default status is "Active".
+3. When updating customers:
+   - Ask for customer ID or search by name first if the ID is not provided.
+4. When listing customers:
+   - Provide a clear, clean markdown summary with names, companies, and statuses.
 5. DELETING CUSTOMERS:
    - Deletion is PERMANENT.
    - When the user asks to delete a customer (e.g., "Delete John Doe"), if they have NOT explicitly confirmed yet, set confirmed: false when calling deleteCustomer or ask for confirmation.
@@ -190,12 +235,8 @@ CRITICAL BEHAVIOR & RULES:
       tools: {
         getCustomers: tool({
           description: 'Fetch, search, filter, or count customers belonging to the authenticated user.',
-          parameters: z.object({
-            search: z.string().optional().describe('Search keyword matching name, email, company, or phone'),
-            status: z.string().optional().describe('Filter by status: Active, Lead, Prospect, or Inactive'),
-            page: z.number().optional().default(1),
-            limit: z.number().optional().default(20),
-          }),
+          inputSchema: getCustomersSchema,
+          parameters: getCustomersSchema,
           execute: async ({ search, status, page, limit }: any) => {
             try {
               const query = new URLSearchParams();
@@ -212,9 +253,8 @@ CRITICAL BEHAVIOR & RULES:
 
         getCustomer: tool({
           description: 'Get a specific customer record by customer ID.',
-          parameters: z.object({
-            customerId: z.number().describe('ID of the customer to retrieve'),
-          }),
+          inputSchema: getCustomerSchema,
+          parameters: getCustomerSchema,
           execute: async ({ customerId }: any) => {
             try {
               return await fetchBackend(`/api/customers/${customerId}`);
@@ -226,15 +266,8 @@ CRITICAL BEHAVIOR & RULES:
 
         createCustomer: tool({
           description: 'Create a new customer record tied to the authenticated user.',
-          parameters: z.object({
-            name: z.string().describe('Full name of the customer'),
-            email: z.string().describe('Customer email address'),
-            phone: z.string().optional().describe('Phone number'),
-            company: z.string().optional().describe('Company name'),
-            status: z.enum(['Active', 'Lead', 'Prospect', 'Inactive']).optional().default('Active'),
-            address: z.string().optional().describe('Physical address'),
-            notes: z.string().optional().describe('Internal notes or observations'),
-          }),
+          inputSchema: createCustomerSchema,
+          parameters: createCustomerSchema,
           execute: async (customerData: any) => {
             try {
               return await fetchBackend('/api/customers', {
@@ -249,16 +282,8 @@ CRITICAL BEHAVIOR & RULES:
 
         updateCustomer: tool({
           description: 'Update an existing customer record by customer ID.',
-          parameters: z.object({
-            customerId: z.number().describe('ID of the customer to update'),
-            name: z.string().optional().describe('New name'),
-            email: z.string().optional().describe('New email address'),
-            phone: z.string().optional().describe('New phone number'),
-            company: z.string().optional().describe('New company name'),
-            status: z.enum(['Active', 'Lead', 'Prospect', 'Inactive']).optional().describe('New status'),
-            address: z.string().optional().describe('New address'),
-            notes: z.string().optional().describe('New notes'),
-          }),
+          inputSchema: updateCustomerSchema,
+          parameters: updateCustomerSchema,
           execute: async ({ customerId, ...updateFields }: any) => {
             try {
               return await fetchBackend(`/api/customers/${customerId}`, {
@@ -273,11 +298,8 @@ CRITICAL BEHAVIOR & RULES:
 
         deleteCustomer: tool({
           description: 'Delete a customer record by ID.',
-          parameters: z.object({
-            customerId: z.number().describe('ID of the customer to delete'),
-            customerName: z.string().describe('Name of the customer'),
-            confirmed: z.boolean().describe('Set to true only if the user explicitly confirmed deletion'),
-          }),
+          inputSchema: deleteCustomerSchema,
+          parameters: deleteCustomerSchema,
           execute: async ({ customerId, customerName, confirmed }: any) => {
             if (!confirmed) {
               return {
