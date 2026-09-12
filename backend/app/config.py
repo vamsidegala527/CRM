@@ -5,7 +5,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "antigravity_secret_key_customer_management_2026_super_secure"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
-    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_ID: str = "64576092611-tlgd7s6jcubbtmk94ho741tjebvjdtbo.apps.googleusercontent.com"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

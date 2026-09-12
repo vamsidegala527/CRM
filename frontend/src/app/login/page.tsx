@@ -228,6 +228,11 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               required
             />
+            {isRegister && (
+              <small style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '0.35rem', display: 'block' }}>
+                Must be at least 6 characters long
+              </small>
+            )}
           </div>
 
           <button

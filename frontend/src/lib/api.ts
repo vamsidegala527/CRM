@@ -70,17 +70,36 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-    ...options,
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      ...options,
+      headers,
+    });
+  } catch (netErr: any) {
+    if (netErr.name === 'TypeError' || (netErr.message && netErr.message.includes('Failed to fetch'))) {
+      throw new Error(`Unable to reach the server at ${API_BASE_URL}. Please ensure the backend service is running and accessible.`);
+    }
+    throw netErr;
+  }
 
   if (!response.ok) {
     let errorMessage = `API Error: ${response.statusText}`;
     try {
       const errData = await response.json();
-      if (errData.detail) {
-        errorMessage = typeof errData.detail === 'string' ? errData.detail : JSON.stringify(errData.detail);
+      if (errData && errData.detail) {
+        if (Array.isArray(errData.detail)) {
+          errorMessage = errData.detail
+            .map((item: any) => {
+              const msg = item.msg || JSON.stringify(item);
+              return msg.replace(/^Value error,\s*/i, '');
+            })
+            .join('. ');
+        } else if (typeof errData.detail === 'string') {
+          errorMessage = errData.detail;
+        } else {
+          errorMessage = JSON.stringify(errData.detail);
+        }
       }
     } catch (e) {
       // Ignore JSON parse error

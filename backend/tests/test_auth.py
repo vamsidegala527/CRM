@@ -146,3 +146,25 @@ def test_google_auth_invalid_token():
         response = client.post("/api/auth/google", json={"id_token": "invalid_token"})
         assert response.status_code == 401
         assert "Invalid or expired Google ID token" in response.json()["detail"]
+
+def test_cors_preflight_google_auth_with_extra_headers():
+    # Tests that Google Identity Services / browser preflights with extra headers succeed with 200
+    response = client.options("/api/auth/google", headers={
+        "Origin": "http://localhost:3000",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type, x-goog-authuser, sec-ch-ua, authorization"
+    })
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == "http://localhost:3000"
+    allow_headers = response.headers.get("access-control-allow-headers", "")
+    assert "content-type" in allow_headers.lower()
+
+def test_cors_preflight_127_origin():
+    response = client.options("/api/auth/login", headers={
+        "Origin": "http://127.0.0.1:3000",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type"
+    })
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == "http://127.0.0.1:3000"
+
