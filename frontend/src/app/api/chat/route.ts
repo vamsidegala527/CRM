@@ -125,7 +125,8 @@ export async function POST(req: Request) {
     let modelInstance: any;
     if (groqKey) {
       const groq = createGroq({ apiKey: groqKey });
-      const groqModelName = process.env.GROQ_MODEL || 'qwen/qwen3.8-27b';
+      // openai/gpt-oss-120b has high OTPM limits on Groq; customizable via GROQ_MODEL
+      const groqModelName = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
       modelInstance = groq(groqModelName);
     } else {
       const google = createGoogleGenerativeAI({ apiKey: geminiKey });
@@ -199,8 +200,11 @@ export async function POST(req: Request) {
       confirmed: z.boolean().describe('Set to true only if the user explicitly confirmed deletion'),
     });
 
+    const maxOutputTokens = process.env.AI_MAX_OUTPUT_TOKENS ? Number(process.env.AI_MAX_OUTPUT_TOKENS) : 600;
+
     const result = streamText({
       model: modelInstance,
+      maxOutputTokens,
       system: `You are an intelligent, friendly Customer Management AI Assistant embedded in the Customer Hub application.
 You have direct tool access to live customer data. Help users manage their customer relationships effectively and safely.
 
@@ -345,9 +349,12 @@ RULES:
         msg.includes('429') ||
         msg.includes('RESOURCE_EXHAUSTED') ||
         msg.includes('rate-limits') ||
-        msg.includes('rate_limit_exceeded')
+        msg.includes('rate_limit_exceeded') ||
+        msg.includes('output tokens per minute') ||
+        msg.includes('OTPM') ||
+        msg.includes('Request too large')
       ) {
-        return 'AI request limit reached. Please wait a brief moment before sending another message.';
+        return 'AI rate limit reached. Please wait a brief moment before sending another message.';
       }
       if (msg.includes('Unauthorized') || msg.includes('token') || msg.includes('Not authenticated')) {
         return 'Authentication token missing or expired. Please sign in again.';
