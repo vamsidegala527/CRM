@@ -9,5 +9,6 @@ COPY . .
 
 ENV PYTHONPATH=/app
 
-# Seed database and start FastAPI server on 0.0.0.0:8000
-CMD python -m app.seed && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+# Seed database and start FastAPI server respecting dynamic platform PORT
+CMD sh -c "python -m app.seed ; python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"
+

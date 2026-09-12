@@ -1,6 +1,23 @@
 import { Customer, CustomerInput, CustomerListResponse, AuthResponse, User } from '../types/customer';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+export function getApiBaseUrl(): string {
+  const envUrl = process.env.NEXT_PUBLIC_API_URL;
+  // If explicitly configured with a remote URL (not localhost or loopback), use it directly
+  if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
+    return envUrl.replace(/\/+$/, '');
+  }
+  // In the browser on a deployed host (Render, Vercel, or custom domain):
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+      // Return '/api/proxy' so browser requests are made to the frontend domain
+      // and proxied directly through Next.js runtime proxy to the backend!
+      return '/api/proxy';
+    }
+  }
+  // Local development fallback
+  return (envUrl || 'http://localhost:8000').replace(/\/+$/, '');
+}
 
 export function getAuthToken(): string | null {
   if (typeof window !== 'undefined') {
@@ -70,15 +87,17 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers['Authorization'] = `Bearer ${token}`;
   }
 
+  const baseUrl = getApiBaseUrl();
   let response: Response;
   try {
-    response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    response = await fetch(`${baseUrl}${endpoint}`, {
       ...options,
       headers,
     });
   } catch (netErr: any) {
     if (netErr.name === 'TypeError' || (netErr.message && netErr.message.includes('Failed to fetch'))) {
-      throw new Error(`Unable to reach the server at ${API_BASE_URL}. Please ensure the backend service is running and accessible.`);
+      const displayHost = baseUrl || (typeof window !== 'undefined' ? window.location.origin : 'backend');
+      throw new Error(`Unable to reach the server at ${displayHost}. Please ensure the backend service is running and accessible.`);
     }
     throw netErr;
   }

@@ -18,6 +18,8 @@ services:
         value: HS256
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
         value: "1440"
+      - key: GOOGLE_CLIENT_ID
+        value: 64576092611-tlgd7s6jcubbtmk94ho741tjebvjdtbo.apps.googleusercontent.com
 
   # Frontend Next.js Web Service
   - type: web
@@ -33,6 +35,15 @@ services:
           type: web
           name: customer-backend
           property: url
+      - key: INTERNAL_API_URL
+        fromService:
+          type: web
+          name: customer-backend
+          property: url
+      - key: NEXT_PUBLIC_GOOGLE_CLIENT_ID
+        value: 64576092611-tlgd7s6jcubbtmk94ho741tjebvjdtbo.apps.googleusercontent.com
+      - key: GEMINI_API_KEY
+        sync: false
 
 databases:
   - name: customer-postgres-db
