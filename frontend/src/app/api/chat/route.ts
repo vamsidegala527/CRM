@@ -1,4 +1,5 @@
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createGroq } from '@ai-sdk/groq';
 import { streamText, tool, stepCountIs } from 'ai';
 import { z } from 'zod';
 
@@ -108,19 +109,27 @@ export async function POST(req: Request) {
       });
     }
 
-    const apiKey = (process.env.GEMINI_API_KEY || '').trim();
-    if (!apiKey) {
+    const groqKey = (process.env.GROQ_API_KEY || '').trim();
+    const geminiKey = (process.env.GEMINI_API_KEY || '').trim();
+
+    if (!groqKey && !geminiKey) {
       return new Response(
         JSON.stringify({
-          error: 'Google Gemini API key is not configured. Please add GEMINI_API_KEY to your Render environment variables (Render Dashboard > customer-frontend > Environment).'
+          error: 'No AI API key configured. Please set GROQ_API_KEY (from https://console.groq.com) or GEMINI_API_KEY in your environment variables.'
         }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    const google = createGoogleGenerativeAI({
-      apiKey,
-    });
+    // Select provider: Groq takes priority for high speed and generous free limits, falling back to Gemini
+    let modelInstance: any;
+    if (groqKey) {
+      const groq = createGroq({ apiKey: groqKey });
+      modelInstance = groq('llama-3.3-70b-versatile');
+    } else {
+      const google = createGoogleGenerativeAI({ apiKey: geminiKey });
+      modelInstance = google('gemini-3.6-flash');
+    }
 
     const backendBase = (
       process.env.INTERNAL_API_URL ||
@@ -152,7 +161,7 @@ export async function POST(req: Request) {
     };
 
     const result = streamText({
-      model: google('gemini-3.6-flash'),
+      model: modelInstance,
       system: `You are an intelligent, friendly Customer Management AI Assistant embedded in the Customer Hub application.
 Your mission is to help authenticated users manage their isolated customer database through natural language commands and questions.
 
@@ -303,18 +312,20 @@ CRITICAL BEHAVIOR & RULES:
         msg.includes('API key') ||
         msg.includes('API_KEY') ||
         msg.includes('unregistered callers') ||
-        msg.includes('consumer identity')
+        msg.includes('consumer identity') ||
+        msg.includes('invalid_api_key')
       ) {
-        return 'Google Gemini API key is missing or invalid. Please add GEMINI_API_KEY to your Render deployment dashboard (customer-frontend > Environment).';
+        return 'AI API key is missing or invalid. Please check your GROQ_API_KEY or GEMINI_API_KEY environment variable.';
       }
       if (
         msg.includes('quota') ||
         msg.includes('Quota') ||
         msg.includes('429') ||
         msg.includes('RESOURCE_EXHAUSTED') ||
-        msg.includes('rate-limits')
+        msg.includes('rate-limits') ||
+        msg.includes('rate_limit_exceeded')
       ) {
-        return 'Google Gemini API quota limit reached. Please wait a brief moment before sending another message.';
+        return 'AI request limit reached. Please wait a brief moment before sending another message.';
       }
       if (msg.includes('Unauthorized') || msg.includes('token') || msg.includes('Not authenticated')) {
         return 'Authentication token missing or expired. Please sign in again.';

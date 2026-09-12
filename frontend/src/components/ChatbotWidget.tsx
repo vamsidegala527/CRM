@@ -852,7 +852,7 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
                       }}
                     />
                     <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
-                    <span>Gemini is analyzing & executing operations...</span>
+                    <span>AI Assistant is analyzing & executing operations...</span>
                   </div>
                 )}
 
