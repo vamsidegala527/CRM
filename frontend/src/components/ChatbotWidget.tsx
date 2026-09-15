@@ -74,6 +74,131 @@ function extractSuggestions(rawText: string): { cleanText: string; suggestions: 
 }
 
 /**
+ * Extracts ONLY customer details (omitting conversational explanations,
+ * greetings, and confirmation text) from assistant response text or tool execution results.
+ */
+function extractCustomerDetails(cleanText: string, toolInvocations?: any[]): string {
+  // 1. If tool invocation has structured customer data
+  if (Array.isArray(toolInvocations)) {
+    for (const inv of toolInvocations) {
+      if (inv && inv.result) {
+        // Multiple items from getCustomers
+        if (Array.isArray(inv.result.items) && inv.result.items.length > 0) {
+          if (inv.result.items.length === 1) {
+            const c = inv.result.items[0];
+            const lines: string[] = [];
+            if (c.id) lines.push(`ID: ${c.id}`);
+            if (c.name) lines.push(`Name: ${c.name}`);
+            if (c.email) lines.push(`Email: ${c.email}`);
+            if (c.company && c.company !== '-') lines.push(`Company: ${c.company}`);
+            if (c.phone && c.phone !== '-') lines.push(`Phone: ${c.phone}`);
+            if (c.status) lines.push(`Status: ${c.status}`);
+            if (c.address && c.address !== '-') lines.push(`Address: ${c.address}`);
+            if (c.notes && c.notes !== '-') lines.push(`Notes: ${c.notes}`);
+            return lines.join('\n');
+          }
+          return inv.result.items
+            .map((c: any, i: number) => {
+              const parts: string[] = [];
+              if (c.id) parts.push(`ID: ${c.id}`);
+              if (c.name) parts.push(`Name: ${c.name}`);
+              if (c.email) parts.push(`Email: ${c.email}`);
+              if (c.company && c.company !== '-') parts.push(`Company: ${c.company}`);
+              if (c.phone && c.phone !== '-') parts.push(`Phone: ${c.phone}`);
+              if (c.status) parts.push(`Status: ${c.status}`);
+              return `${i + 1}. ` + parts.join(' | ');
+            })
+            .join('\n');
+        }
+
+        // Single customer from createCustomer, updateCustomer, getCustomer
+        const c = inv.result.customer || (inv.result.name && inv.result.email ? inv.result : null);
+        if (c && c.name) {
+          const lines: string[] = [];
+          if (c.id) lines.push(`ID: ${c.id}`);
+          lines.push(`Name: ${c.name}`);
+          if (c.email) lines.push(`Email: ${c.email}`);
+          if (c.company && c.company !== '-') lines.push(`Company: ${c.company}`);
+          if (c.phone && c.phone !== '-') lines.push(`Phone: ${c.phone}`);
+          if (c.status) lines.push(`Status: ${c.status}`);
+          if (c.address && c.address !== '-') lines.push(`Address: ${c.address}`);
+          if (c.notes && c.notes !== '-') lines.push(`Notes: ${c.notes}`);
+          return lines.join('\n');
+        }
+      }
+    }
+  }
+
+  // 2. Parse text content
+  const lines = (cleanText || '').split('\n').map((l) => l.trim());
+
+  // Check for markdown table (like in user screenshot)
+  const tableLines = lines.filter((l) => l.startsWith('|') && l.endsWith('|'));
+  if (tableLines.length >= 2) {
+    const headerRow = tableLines[0]
+      .split('|')
+      .map((c) => c.trim())
+      .filter(Boolean);
+    const dataRows = tableLines
+      .slice(1)
+      .filter((l) => !/^\|[\s\-:|]+\|$/.test(l)) // remove separator |---|---|
+      .map((row) =>
+        row
+          .split('|')
+          .map((c) => c.trim().replace(/\*\*/g, ''))
+          .filter((_, idx, arr) => idx > 0 && idx < arr.length - 1)
+      );
+
+    if (dataRows.length === 1 && headerRow.length > 0) {
+      const row = dataRows[0];
+      const customerInfo: string[] = [];
+      headerRow.forEach((header, idx) => {
+        const val = row[idx];
+        if (val && val !== '-' && val !== 'None' && val !== 'null') {
+          customerInfo.push(`${header}: ${val}`);
+        }
+      });
+      if (customerInfo.length > 0) {
+        return customerInfo.join('\n');
+      }
+    } else if (dataRows.length > 1 && headerRow.length > 0) {
+      return dataRows
+        .map((row, i) => {
+          const parts: string[] = [];
+          headerRow.forEach((header, idx) => {
+            const val = row[idx];
+            if (val && val !== '-' && val !== 'None') {
+              parts.push(`${header}: ${val}`);
+            }
+          });
+          return `${i + 1}. ` + parts.join(' | ');
+        })
+        .join('\n');
+    }
+
+    const nonSeparator = tableLines.filter((l) => !/^\|[\s\-:|]+\|$/.test(l));
+    return nonSeparator.join('\n');
+  }
+
+  // Check for bullet points with customer attributes
+  const fieldRegex = /^(?:[-*•]\s*)?(?:\*\*)?(name|email|phone|company|status|address|notes|customer\s*id|id)(?:\*\*)?\s*:\s*(.+)$/i;
+  const matchedFields: string[] = [];
+  for (const line of lines) {
+    const m = line.match(fieldRegex);
+    if (m) {
+      const key = m[1].replace(/\*\*/g, '').trim();
+      const val = m[2].replace(/\*\*/g, '').replace(/`/g, '').trim();
+      matchedFields.push(key.charAt(0).toUpperCase() + key.slice(1) + ': ' + val);
+    }
+  }
+  if (matchedFields.length > 0) {
+    return matchedFields.join('\n');
+  }
+
+  return cleanText;
+}
+
+/**
  * Lightweight inline markdown renderer for bold, italics, inline code, and status badges.
  */
 function renderInlineMarkdown(text: string): React.ReactNode[] {
@@ -567,8 +692,9 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
     });
   };
 
-  const handleCopyMessage = (msgId: string, text: string) => {
-    navigator.clipboard.writeText(text);
+  const handleCopyMessage = (msgId: string, text: string, toolInvocations?: any[]) => {
+    const customerDetails = extractCustomerDetails(text, toolInvocations);
+    navigator.clipboard.writeText(customerDetails);
     setCopiedMessageId(msgId);
     setTimeout(() => setCopiedMessageId(null), 2000);
   };
@@ -1163,34 +1289,40 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
                           return null;
                         })}
 
-                        {/* Copy message button (for assistant messages) */}
+                        {/* Copy customer details button (for assistant messages) */}
                         {!isUser && cleanText && (
                           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.45rem' }}>
                             <button
                               type="button"
-                              onClick={() => handleCopyMessage(m.id || String(mIndex), cleanText)}
-                              title="Copy response"
+                              onClick={() => handleCopyMessage(m.id || String(mIndex), cleanText, toolInvocations)}
+                              title="Copy customer details only"
                               style={{
-                                background: 'none',
-                                border: 'none',
-                                color: copiedMessageId === (m.id || String(mIndex)) ? '#34D399' : '#64748B',
+                                background: 'rgba(255, 255, 255, 0.04)',
+                                border: '1px solid rgba(255, 255, 255, 0.08)',
+                                color: copiedMessageId === (m.id || String(mIndex)) ? '#34D399' : '#94A3B8',
                                 cursor: 'pointer',
-                                fontSize: '0.7rem',
+                                fontSize: '0.725rem',
                                 display: 'flex',
                                 alignItems: 'center',
-                                gap: '0.25rem',
-                                padding: '2px 6px',
-                                borderRadius: '4px',
-                                transition: 'color 0.15s ease',
+                                gap: '0.3rem',
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                transition: 'all 0.15s ease',
                               }}
                               onMouseEnter={(e) => {
-                                if (copiedMessageId !== (m.id || String(mIndex))) e.currentTarget.style.color = '#CBD5E1';
+                                if (copiedMessageId !== (m.id || String(mIndex))) {
+                                  e.currentTarget.style.color = '#CBD5E1';
+                                  e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.35)';
+                                }
                               }}
                               onMouseLeave={(e) => {
-                                if (copiedMessageId !== (m.id || String(mIndex))) e.currentTarget.style.color = '#64748B';
+                                if (copiedMessageId !== (m.id || String(mIndex))) {
+                                  e.currentTarget.style.color = '#94A3B8';
+                                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                                }
                               }}
                             >
-                              {copiedMessageId === (m.id || String(mIndex)) ? '✓ Copied' : '📋 Copy'}
+                              {copiedMessageId === (m.id || String(mIndex)) ? '✓ Copied Details' : '📋 Copy Details'}
                             </button>
                           </div>
                         )}
