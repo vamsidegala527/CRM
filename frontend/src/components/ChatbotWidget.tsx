@@ -8,20 +8,75 @@ interface ChatbotWidgetProps {
   onCustomerChange?: () => void;
 }
 
-const SUGGESTED_QUICK_ACTIONS = [
-  { icon: '📋', label: 'Show all my customers', prompt: 'Show all my customers' },
-  { icon: '📊', label: 'How many customers do I have?', prompt: 'How many customers do I have?' },
-  { icon: '➕', label: 'Add a new customer', prompt: 'I want to add a new customer' },
-  { icon: '🔍', label: 'Find customer by company/name', prompt: 'Search for customers from Acme' },
-  { icon: '✏️', label: 'Update customer information', prompt: 'How do I update a customer?' },
-  { icon: '🗑️', label: 'Delete customer record', prompt: 'How do I delete a customer?' },
+// Initial quick action prompts for empty state
+const STARTER_CATEGORIES = [
+  {
+    category: 'View & Search',
+    items: [
+      { icon: '📋', label: 'Show all my customers', prompt: 'Show all my customers' },
+      { icon: '⚡', label: 'Show Active customers only', prompt: 'Show only my Active customers' },
+      { icon: '🔍', label: 'Find customer by company/name', prompt: 'Search for customer Acme' },
+    ],
+  },
+  {
+    category: 'Manage & Add',
+    items: [
+      { icon: '➕', label: 'Add a new customer', prompt: 'I want to add a new customer' },
+      { icon: '✏️', label: 'Update customer details', prompt: 'How do I update an existing customer?' },
+      { icon: '🗑️', label: 'Safely delete a record', prompt: 'How do I delete a customer?' },
+    ],
+  },
+  {
+    category: 'Insights & Analytics',
+    items: [
+      { icon: '📊', label: 'Customer status overview', prompt: 'Give me a summary breakdown of my customers by status' },
+      { icon: '🎯', label: 'How many Leads do I have?', prompt: 'How many customer Leads do I currently have?' },
+    ],
+  },
 ];
+
+// Quick action chips bar above input
+const QUICK_BAR_PROMPTS = [
+  { icon: '📋', label: 'List All', prompt: 'Show all my customers' },
+  { icon: '➕', label: 'New Customer', prompt: 'I want to add a new customer' },
+  { icon: '⚡', label: 'Active', prompt: 'Show active customers' },
+  { icon: '🎯', label: 'Leads', prompt: 'Show leads' },
+  { icon: '📊', label: 'Stats', prompt: 'Give me a breakdown of all customers by status' },
+];
+
+/**
+ * Extracts structured [SUGGESTIONS: "..."] from assistant markdown output.
+ */
+function extractSuggestions(rawText: string): { cleanText: string; suggestions: string[] } {
+  if (!rawText) return { cleanText: '', suggestions: [] };
+
+  const match = rawText.match(/\[SUGGESTIONS?:\s*([^[\]]+)\]/i);
+  if (!match) {
+    return { cleanText: rawText, suggestions: [] };
+  }
+
+  const cleanText = rawText.replace(/\[SUGGESTIONS?:\s*([^[\]]+)\]/i, '').trimEnd();
+  const rawList = match[1].trim();
+
+  try {
+    if (rawList.startsWith('[') && rawList.endsWith(']')) {
+      const parsed = JSON.parse(rawList);
+      return { cleanText, suggestions: Array.isArray(parsed) ? parsed : [] };
+    }
+    const items = rawList
+      .split(/,\s*(?=(?:(?:[^"]*"){2})*[^"]*$)/)
+      .map((s) => s.replace(/^["']|["']$/g, '').trim())
+      .filter((s) => s.length > 0);
+    return { cleanText, suggestions: items };
+  } catch {
+    return { cleanText, suggestions: [] };
+  }
+}
 
 /**
  * Lightweight inline markdown renderer for bold, italics, inline code, and status badges.
  */
 function renderInlineMarkdown(text: string): React.ReactNode[] {
-  // Regex splitting by code tokens, bold tokens, italic tokens
   const tokenRegex = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g;
   const parts = text.split(tokenRegex);
 
@@ -48,7 +103,6 @@ function renderInlineMarkdown(text: string): React.ReactNode[] {
 
     if (part.startsWith('**') && part.endsWith('**')) {
       const boldText = part.slice(2, -2);
-      // Status highlight check
       if (['Active', 'Lead', 'Prospect', 'Inactive'].includes(boldText)) {
         const bgColors: Record<string, string> = {
           Active: 'rgba(16, 185, 129, 0.2)',
@@ -74,6 +128,7 @@ function renderInlineMarkdown(text: string): React.ReactNode[] {
               fontWeight: 700,
               display: 'inline-block',
               margin: '0 2px',
+              border: `1px solid ${textColors[boldText] || '#818CF8'}40`,
             }}
           >
             {boldText}
@@ -110,10 +165,9 @@ function FormattedMessageBody({ content }: { content: string }) {
       {lines.map((line, idx) => {
         const trimmed = line.trim();
         if (!trimmed) {
-          return <div key={idx} style={{ height: '0.25rem' }} />;
+          return <div key={idx} style={{ height: '0.2rem' }} />;
         }
 
-        // Headings ### or ##
         if (trimmed.startsWith('### ') || trimmed.startsWith('## ')) {
           const title = trimmed.replace(/^#{2,3}\s+/, '');
           return (
@@ -124,7 +178,7 @@ function FormattedMessageBody({ content }: { content: string }) {
                 fontSize: '0.95rem',
                 color: '#F8FAFC',
                 marginTop: '0.4rem',
-                marginBottom: '0.2rem',
+                marginBottom: '0.15rem',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.35rem',
@@ -135,7 +189,6 @@ function FormattedMessageBody({ content }: { content: string }) {
           );
         }
 
-        // Bullet point lists (* or -)
         if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
           const itemText = trimmed.slice(2);
           return (
@@ -163,7 +216,6 @@ function FormattedMessageBody({ content }: { content: string }) {
           );
         }
 
-        // Numbered lists (1. , 2. )
         const numberedMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
         if (numberedMatch) {
           const num = numberedMatch[1];
@@ -180,7 +232,7 @@ function FormattedMessageBody({ content }: { content: string }) {
             >
               <span
                 style={{
-                  color: '#6366F1',
+                  color: '#818CF8',
                   fontSize: '0.8rem',
                   fontWeight: 700,
                   minWidth: '1.2rem',
@@ -194,9 +246,213 @@ function FormattedMessageBody({ content }: { content: string }) {
           );
         }
 
-        // Regular paragraph line
         return <div key={idx}>{renderInlineMarkdown(line)}</div>;
       })}
+    </div>
+  );
+}
+
+/**
+ * Rich Interactive Card for Created/Updated/Retrieved Customer Records.
+ */
+function CustomerResultCard({
+  customer,
+  actionType,
+  onAction,
+}: {
+  customer: any;
+  actionType: 'created' | 'updated' | 'viewed';
+  onAction: (prompt: string) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  if (!customer || (!customer.id && !customer.name)) return null;
+
+  const statusColors: Record<string, { bg: string; text: string; border: string }> = {
+    Active: { bg: 'rgba(16, 185, 129, 0.15)', text: '#34D399', border: 'rgba(16, 185, 129, 0.35)' },
+    Lead: { bg: 'rgba(59, 130, 246, 0.15)', text: '#60A5FA', border: 'rgba(59, 130, 246, 0.35)' },
+    Prospect: { bg: 'rgba(168, 85, 247, 0.15)', text: '#C084FC', border: 'rgba(168, 85, 247, 0.35)' },
+    Inactive: { bg: 'rgba(156, 163, 175, 0.15)', text: '#9CA3AF', border: 'rgba(156, 163, 175, 0.35)' },
+  };
+
+  const status = customer.status || 'Active';
+  const colors = statusColors[status] || statusColors.Active;
+
+  const initials = (customer.name || 'C')
+    .split(' ')
+    .map((w: string) => w[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+
+  const handleCopyEmail = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (customer.email) {
+      navigator.clipboard.writeText(customer.email);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        marginTop: '0.65rem',
+        background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.85) 0%, rgba(15, 23, 42, 0.95) 100%)',
+        border: '1px solid rgba(99, 102, 241, 0.35)',
+        borderRadius: '14px',
+        padding: '0.85rem 1rem',
+        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.35)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.65rem',
+      }}
+    >
+      {/* Header Banner */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '0.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+          <span style={{ fontSize: '0.85rem' }}>
+            {actionType === 'created' ? '✅ Customer Created' : actionType === 'updated' ? '🔄 Customer Updated' : '👤 Customer Details'}
+          </span>
+        </div>
+        <span
+          style={{
+            background: colors.bg,
+            color: colors.text,
+            border: `1px solid ${colors.border}`,
+            padding: '2px 8px',
+            borderRadius: '999px',
+            fontSize: '0.725rem',
+            fontWeight: 700,
+          }}
+        >
+          {status}
+        </span>
+      </div>
+
+      {/* Main Info */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <div
+          style={{
+            width: '38px',
+            height: '38px',
+            borderRadius: '12px',
+            background: 'linear-gradient(135deg, #6366F1 0%, #06B6D4 100%)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '0.9rem',
+            fontWeight: 800,
+            color: '#FFFFFF',
+            flexShrink: 0,
+            boxShadow: '0 4px 12px rgba(99, 102, 241, 0.3)',
+          }}
+        >
+          {initials}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+            <span style={{ fontWeight: 700, fontSize: '0.925rem', color: '#F8FAFC', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {customer.name}
+            </span>
+            {customer.id && (
+              <span style={{ fontSize: '0.7rem', color: '#818CF8', background: 'rgba(99, 102, 241, 0.15)', padding: '1px 6px', borderRadius: '4px' }}>
+                #{customer.id}
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: '0.775rem', color: '#94A3B8', display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '2px' }}>
+            <span>✉️ {customer.email || 'No email'}</span>
+            {customer.email && (
+              <button
+                type="button"
+                onClick={handleCopyEmail}
+                title="Copy email address"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: copied ? '#34D399' : '#818CF8',
+                  cursor: 'pointer',
+                  fontSize: '0.7rem',
+                  padding: '1px 4px',
+                  borderRadius: '4px',
+                  fontWeight: 600,
+                }}
+              >
+                {copied ? '✓ Copied' : 'Copy'}
+              </button>
+            )}
+          </div>
+          {customer.company && (
+            <div style={{ fontSize: '0.75rem', color: '#CBD5E1', marginTop: '1px' }}>
+              🏢 {customer.company}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Quick Action Footer */}
+      <div style={{ display: 'flex', gap: '0.4rem', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '0.5rem' }}>
+        <button
+          type="button"
+          onClick={() => onAction(`Show full details for customer #${customer.id}`)}
+          style={{
+            flex: 1,
+            background: 'rgba(255, 255, 255, 0.05)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: '8px',
+            padding: '0.35rem 0.6rem',
+            color: '#E2E8F0',
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(99, 102, 241, 0.2)')}
+          onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)')}
+        >
+          👁️ Details
+        </button>
+        <button
+          type="button"
+          onClick={() => onAction(`Update customer #${customer.id} with new details:`)}
+          style={{
+            flex: 1,
+            background: 'rgba(255, 255, 255, 0.05)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: '8px',
+            padding: '0.35rem 0.6rem',
+            color: '#E2E8F0',
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(99, 102, 241, 0.2)')}
+          onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)')}
+        >
+          ✏️ Edit
+        </button>
+        <button
+          type="button"
+          onClick={() => onAction(`Delete customer #${customer.id}`)}
+          style={{
+            background: 'rgba(239, 68, 68, 0.12)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            borderRadius: '8px',
+            padding: '0.35rem 0.6rem',
+            color: '#FCA5A5',
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(239, 68, 68, 0.25)')}
+          onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(239, 68, 68, 0.12)')}
+        >
+          🗑️
+        </button>
+      </div>
     </div>
   );
 }
@@ -206,7 +462,12 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
   const [isMinimized, setIsMinimized] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [input, setInput] = useState('');
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const chat: any = useChat({
@@ -256,8 +517,16 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
     });
   };
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
+  };
+
+  const handleScroll = () => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    setShowScrollBottom(distanceFromBottom > 160);
   };
 
   useEffect(() => {
@@ -281,6 +550,7 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
 
   const handleClearChat = () => {
     setMessages([]);
+    setShowClearConfirm(false);
   };
 
   const handleConfirmDelete = (customerId: number, customerName: string) => {
@@ -297,7 +567,13 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
     });
   };
 
-  // Helper to extract text from Vercel AI SDK message formats
+  const handleCopyMessage = (msgId: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedMessageId(msgId);
+    setTimeout(() => setCopiedMessageId(null), 2000);
+  };
+
+  // Helper to extract clean text from Vercel AI SDK message formats
   const getMessageText = (msg: any): string => {
     if (typeof msg.content === 'string' && msg.content.trim()) {
       return msg.content;
@@ -315,7 +591,6 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
     return '';
   };
 
-  // Get current timestamp formatted
   const formatTime = (date?: Date | string) => {
     try {
       const d = date ? new Date(date) : new Date();
@@ -383,29 +658,29 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
         <div
           style={{
             position: 'fixed',
-            bottom: '24px',
-            right: '24px',
+            bottom: '20px',
+            right: '20px',
             zIndex: 1000,
-            width: isExpanded ? '620px' : '430px',
-            maxWidth: 'calc(100vw - 32px)',
-            height: isMinimized ? '64px' : '630px',
-            maxHeight: 'calc(100vh - 40px)',
-            background: 'rgba(15, 23, 42, 0.94)',
-            backdropFilter: 'blur(20px)',
+            width: isExpanded ? '660px' : '440px',
+            maxWidth: 'calc(100vw - 28px)',
+            height: isMinimized ? '64px' : '650px',
+            maxHeight: 'calc(100vh - 36px)',
+            background: 'rgba(15, 23, 42, 0.95)',
+            backdropFilter: 'blur(24px)',
             border: '1px solid rgba(99, 102, 241, 0.35)',
             borderRadius: '20px',
-            boxShadow: '0 24px 60px rgba(0, 0, 0, 0.7), 0 0 1px rgba(255, 255, 255, 0.1) inset',
+            boxShadow: '0 24px 60px rgba(0, 0, 0, 0.75), 0 0 1px rgba(255, 255, 255, 0.15) inset',
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
-            transition: 'width 0.3s cubic-bezier(0.16, 1, 0.3, 1), height 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+            transition: 'width 0.28s cubic-bezier(0.16, 1, 0.3, 1), height 0.28s cubic-bezier(0.16, 1, 0.3, 1)',
           }}
         >
           {/* Header */}
           <div
             style={{
-              padding: '0.85rem 1.25rem',
-              background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(6, 182, 212, 0.15) 100%)',
+              padding: '0.85rem 1.2rem',
+              background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.22) 0%, rgba(6, 182, 212, 0.16) 100%)',
               borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
               display: 'flex',
               alignItems: 'center',
@@ -444,16 +719,16 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
                       boxShadow: '0 0 6px #34D399',
                     }}
                   />
-                  <span>Online • Gemini 3.8 Flash</span>
+                  <span>Online • High Speed Groq AI</span>
                 </div>
               </div>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-              {messages.length > 0 && !isMinimized && (
+              {messages.length > 0 && !isMinimized && !showClearConfirm && (
                 <button
                   id="chatbot-clear-btn"
-                  onClick={handleClearChat}
+                  onClick={() => setShowClearConfirm(true)}
                   title="Clear conversation"
                   style={{
                     background: 'rgba(255, 255, 255, 0.06)',
@@ -471,6 +746,25 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
                   🧹 Clear
                 </button>
               )}
+
+              {showClearConfirm && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', background: 'rgba(239, 68, 68, 0.18)', border: '1px solid rgba(239, 68, 68, 0.4)', borderRadius: '8px', padding: '2px 6px' }}>
+                  <span style={{ fontSize: '0.725rem', color: '#FCA5A5' }}>Clear chat?</span>
+                  <button
+                    onClick={handleClearChat}
+                    style={{ background: '#EF4444', color: '#FFF', border: 'none', borderRadius: '4px', padding: '2px 6px', fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer' }}
+                  >
+                    Yes
+                  </button>
+                  <button
+                    onClick={() => setShowClearConfirm(false)}
+                    style={{ background: 'none', color: '#E2E8F0', border: 'none', fontSize: '0.7rem', cursor: 'pointer' }}
+                  >
+                    No
+                  </button>
+                </div>
+              )}
+
               <button
                 id="chatbot-expand-btn"
                 onClick={() => setIsExpanded(!isExpanded)}
@@ -534,13 +828,16 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
             <>
               {/* Message List */}
               <div
+                ref={messagesContainerRef}
+                onScroll={handleScroll}
                 style={{
                   flex: 1,
                   overflowY: 'auto',
-                  padding: '1.25rem',
+                  padding: '1.2rem',
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '1.25rem',
+                  position: 'relative',
                 }}
               >
                 {/* Welcome Empty State */}
@@ -548,104 +845,108 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
                   <div style={{ textAlign: 'center', margin: 'auto 0', padding: '0.5rem 0' }}>
                     <div
                       style={{
-                        width: '54px',
-                        height: '54px',
-                        borderRadius: '16px',
-                        background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(6, 182, 212, 0.2) 100%)',
-                        border: '1px solid rgba(99, 102, 241, 0.35)',
+                        width: '56px',
+                        height: '56px',
+                        borderRadius: '18px',
+                        background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.25) 0%, rgba(6, 182, 212, 0.25) 100%)',
+                        border: '1px solid rgba(99, 102, 241, 0.4)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        fontSize: '1.75rem',
+                        fontSize: '1.85rem',
                         margin: '0 auto 1rem',
                         boxShadow: '0 8px 24px rgba(99, 102, 241, 0.25)',
                       }}
                     >
                       👋
                     </div>
-                    <h4 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#F8FAFC', margin: '0 0 0.4rem' }}>
+                    <h4 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#F8FAFC', margin: '0 0 0.35rem' }}>
                       How can I help you today?
                     </h4>
-                    <p style={{ fontSize: '0.825rem', color: '#94A3B8', margin: '0 auto 1.5rem', maxWidth: '340px', lineHeight: 1.5 }}>
-                      Manage your customers naturally. You can ask to view, create, search, update, or delete customers.
+                    <p style={{ fontSize: '0.825rem', color: '#94A3B8', margin: '0 auto 1.4rem', maxWidth: '360px', lineHeight: 1.5 }}>
+                      Manage your customer database naturally with AI. Ask questions, create contacts, search, update statuses, or get instant insights.
                     </p>
 
-                    {/* Quick Action Suggested Grid */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem', textAlign: 'left' }}>
-                      <span
-                        style={{
-                          fontSize: '0.7rem',
-                          fontWeight: 700,
-                          textTransform: 'uppercase',
-                          color: '#64748B',
-                          letterSpacing: '0.06em',
-                          paddingLeft: '0.2rem',
-                        }}
-                      >
-                        Quick Actions:
-                      </span>
-                      <div
-                        style={{
-                          display: 'grid',
-                          gridTemplateColumns: isExpanded ? '1fr 1fr' : '1fr',
-                          gap: '0.5rem',
-                        }}
-                      >
-                        {SUGGESTED_QUICK_ACTIONS.map((item, idx) => (
-                          <button
-                            key={idx}
-                            className="chatbot-quick-action-btn"
-                            data-prompt={item.prompt}
-                            onClick={() => handleSuggestedClick(item.prompt)}
+                    {/* Categorized Starters */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem', textAlign: 'left' }}>
+                      {STARTER_CATEGORIES.map((cat, catIdx) => (
+                        <div key={catIdx} style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                          <span
                             style={{
-                              background: 'rgba(255, 255, 255, 0.03)',
-                              border: '1px solid rgba(255, 255, 255, 0.08)',
-                              borderRadius: '12px',
-                              padding: '0.65rem 0.9rem',
-                              color: '#E2E8F0',
-                              fontSize: '0.825rem',
-                              textAlign: 'left',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '0.6rem',
-                              transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.background = 'rgba(99, 102, 241, 0.15)';
-                              e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.4)';
-                              e.currentTarget.style.transform = 'translateY(-1px)';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
-                              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
-                              e.currentTarget.style.transform = 'translateY(0)';
+                              fontSize: '0.675rem',
+                              fontWeight: 700,
+                              textTransform: 'uppercase',
+                              color: '#818CF8',
+                              letterSpacing: '0.06em',
+                              paddingLeft: '0.2rem',
                             }}
                           >
-                            <span style={{ fontSize: '1rem', lineHeight: 1 }}>{item.icon}</span>
-                            <span style={{ fontWeight: 500 }}>{item.label}</span>
-                          </button>
-                        ))}
-                      </div>
+                            {cat.category}
+                          </span>
+                          <div
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: isExpanded ? '1fr 1fr 1fr' : '1fr',
+                              gap: '0.45rem',
+                            }}
+                          >
+                            {cat.items.map((item, itemIdx) => (
+                              <button
+                                key={itemIdx}
+                                className="chatbot-quick-action-btn"
+                                onClick={() => handleSuggestedClick(item.prompt)}
+                                style={{
+                                  background: 'rgba(255, 255, 255, 0.035)',
+                                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                                  borderRadius: '12px',
+                                  padding: '0.65rem 0.85rem',
+                                  color: '#E2E8F0',
+                                  fontSize: '0.825rem',
+                                  textAlign: 'left',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.6rem',
+                                  transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.background = 'rgba(99, 102, 241, 0.16)';
+                                  e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.45)';
+                                  e.currentTarget.style.transform = 'translateY(-1px)';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.035)';
+                                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                                  e.currentTarget.style.transform = 'translateY(0)';
+                                }}
+                              >
+                                <span style={{ fontSize: '1rem', lineHeight: 1 }}>{item.icon}</span>
+                                <span style={{ fontWeight: 500, lineHeight: 1.3 }}>{item.label}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
 
                 {/* Messages Loop */}
-                {messages.map((m) => {
-                  const textContent = getMessageText(m);
+                {messages.map((m, mIndex) => {
+                  const rawText = getMessageText(m);
                   const toolInvocations = Array.isArray(m.toolInvocations) ? m.toolInvocations : [];
 
-                  // If empty assistant message with no text content and no tool invocation, hide
-                  if (m.role === 'assistant' && !textContent.trim() && toolInvocations.length === 0) {
+                  if (m.role === 'assistant' && !rawText.trim() && toolInvocations.length === 0) {
                     return null;
                   }
 
                   const isUser = m.role === 'user';
+                  const { cleanText, suggestions } = isUser ? { cleanText: rawText, suggestions: [] } : extractSuggestions(rawText);
+                  const isLatestAssistant = !isUser && mIndex === messages.length - 1;
 
                   return (
                     <div
-                      key={m.id}
+                      key={m.id || mIndex}
                       style={{
                         display: 'flex',
                         flexDirection: 'column',
@@ -665,8 +966,8 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
                       >
                         <div
                           style={{
-                            width: '22px',
-                            height: '22px',
+                            width: '24px',
+                            height: '24px',
                             borderRadius: '50%',
                             background: isUser
                               ? 'linear-gradient(135deg, #6366F1 0%, #4F46E5 100%)'
@@ -674,9 +975,10 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            fontSize: '0.65rem',
+                            fontSize: '0.7rem',
                             color: '#FFF',
                             fontWeight: 700,
+                            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
                           }}
                         >
                           {isUser ? '👤' : '✨'}
@@ -697,41 +999,41 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
                           borderRadius: isUser ? '20px 4px 20px 20px' : '4px 20px 20px 20px',
                           background: isUser
                             ? 'linear-gradient(135deg, #4F46E5 0%, #4338CA 100%)'
-                            : 'rgba(30, 41, 59, 0.75)',
-                          border: isUser ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+                            : 'rgba(30, 41, 59, 0.82)',
+                          border: isUser ? '1px solid rgba(99, 102, 241, 0.45)' : '1px solid rgba(255, 255, 255, 0.09)',
                           color: '#FFFFFF',
                           boxShadow: isUser
                             ? '0 6px 18px rgba(79, 70, 229, 0.35)'
                             : '0 4px 16px rgba(0, 0, 0, 0.35)',
+                          position: 'relative',
                         }}
                       >
                         {/* Formatted Content */}
-                        {textContent && <FormattedMessageBody content={textContent} />}
+                        {cleanText && <FormattedMessageBody content={cleanText} />}
 
                         {/* Interactive Tool Cards & Status Invocations */}
                         {toolInvocations.map((toolInvocation: any) => {
                           const toolCallId = toolInvocation.toolCallId;
                           const toolName = toolInvocation.toolName;
+                          const hasResult = 'result' in toolInvocation;
+                          const result = toolInvocation.result;
 
                           // Delete Confirmation Card
-                          if (
-                            toolName === 'deleteCustomer' &&
-                            'result' in toolInvocation &&
-                            toolInvocation.result?.requiresConfirmation
-                          ) {
-                            const { customerId, customerName } = toolInvocation.result;
+                          if (toolName === 'deleteCustomer' && hasResult && result?.requiresConfirmation) {
+                            const { customerId, customerName } = result;
                             return (
                               <div
                                 key={toolCallId}
                                 style={{
                                   marginTop: '0.85rem',
                                   padding: '1rem',
-                                  background: 'rgba(239, 68, 68, 0.12)',
-                                  border: '1px solid rgba(239, 68, 68, 0.4)',
+                                  background: 'rgba(239, 68, 68, 0.14)',
+                                  border: '1px solid rgba(239, 68, 68, 0.45)',
                                   borderRadius: '12px',
                                   display: 'flex',
                                   flexDirection: 'column',
                                   gap: '0.65rem',
+                                  boxShadow: '0 0 20px rgba(239, 68, 68, 0.15)',
                                 }}
                               >
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', color: '#F87171', fontWeight: 700, fontSize: '0.875rem' }}>
@@ -786,13 +1088,49 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
                             );
                           }
 
-                          // General Tool Status Indicator (when streaming without text yet)
-                          if (!textContent && toolInvocation.state === 'call') {
+                          // Rich Customer Card on createCustomer
+                          if (toolName === 'createCustomer' && hasResult && result && (result.id || result.email)) {
+                            return (
+                              <CustomerResultCard
+                                key={toolCallId}
+                                customer={result}
+                                actionType="created"
+                                onAction={handleSuggestedClick}
+                              />
+                            );
+                          }
+
+                          // Rich Customer Card on updateCustomer
+                          if (toolName === 'updateCustomer' && hasResult && result && (result.id || result.email)) {
+                            return (
+                              <CustomerResultCard
+                                key={toolCallId}
+                                customer={result}
+                                actionType="updated"
+                                onAction={handleSuggestedClick}
+                              />
+                            );
+                          }
+
+                          // Rich Customer Card on getCustomer
+                          if (toolName === 'getCustomer' && hasResult && result && (result.id || result.email)) {
+                            return (
+                              <CustomerResultCard
+                                key={toolCallId}
+                                customer={result}
+                                actionType="viewed"
+                                onAction={handleSuggestedClick}
+                              />
+                            );
+                          }
+
+                          // General Tool Status Indicator during execution
+                          if (!rawText && toolInvocation.state === 'call') {
                             let label = 'Processing operation...';
                             if (toolName === 'getCustomers') label = '🔍 Searching customer database...';
                             if (toolName === 'createCustomer') label = '✨ Creating customer record...';
                             if (toolName === 'updateCustomer') label = '✏️ Updating customer record...';
-                            if (toolName === 'deleteCustomer') label = '🗑️ Preparing deletion...';
+                            if (toolName === 'deleteCustomer') label = '🗑️ Checking customer record...';
 
                             return (
                               <div
@@ -803,8 +1141,8 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
                                   fontStyle: 'italic',
                                   display: 'flex',
                                   alignItems: 'center',
-                                  gap: '0.4rem',
-                                  padding: '0.2rem 0',
+                                  gap: '0.45rem',
+                                  padding: '0.25rem 0',
                                 }}
                               >
                                 <div
@@ -814,7 +1152,7 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
                                     border: '2px solid rgba(99, 102, 241, 0.3)',
                                     borderTopColor: '#6366F1',
                                     borderRadius: '50%',
-                                    animation: 'spin 0.8s linear infinite',
+                                    animation: 'chatbotSpin 0.8s linear infinite',
                                   }}
                                 />
                                 <span>{label}</span>
@@ -824,35 +1162,112 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
 
                           return null;
                         })}
+
+                        {/* Copy message button (for assistant messages) */}
+                        {!isUser && cleanText && (
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.45rem' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleCopyMessage(m.id || String(mIndex), cleanText)}
+                              title="Copy response"
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: copiedMessageId === (m.id || String(mIndex)) ? '#34D399' : '#64748B',
+                                cursor: 'pointer',
+                                fontSize: '0.7rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.25rem',
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                transition: 'color 0.15s ease',
+                              }}
+                              onMouseEnter={(e) => {
+                                if (copiedMessageId !== (m.id || String(mIndex))) e.currentTarget.style.color = '#CBD5E1';
+                              }}
+                              onMouseLeave={(e) => {
+                                if (copiedMessageId !== (m.id || String(mIndex))) e.currentTarget.style.color = '#64748B';
+                              }}
+                            >
+                              {copiedMessageId === (m.id || String(mIndex)) ? '✓ Copied' : '📋 Copy'}
+                            </button>
+                          </div>
+                        )}
                       </div>
+
+                      {/* Contextual Suggestion Chips (rendered under the message) */}
+                      {suggestions.length > 0 && (
+                        <div
+                          style={{
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            gap: '0.4rem',
+                            marginTop: '0.25rem',
+                            paddingLeft: '0.25rem',
+                          }}
+                        >
+                          {suggestions.map((suggestion, sIdx) => (
+                            <button
+                              key={sIdx}
+                              type="button"
+                              onClick={() => handleSuggestedClick(suggestion)}
+                              style={{
+                                background: 'rgba(99, 102, 241, 0.14)',
+                                border: '1px solid rgba(99, 102, 241, 0.35)',
+                                color: '#C7D2FE',
+                                padding: '0.35rem 0.75rem',
+                                borderRadius: '999px',
+                                fontSize: '0.775rem',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.35rem',
+                                transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = 'rgba(99, 102, 241, 0.3)';
+                                e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.6)';
+                                e.currentTarget.style.transform = 'translateY(-1px)';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = 'rgba(99, 102, 241, 0.14)';
+                                e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.35)';
+                                e.currentTarget.style.transform = 'translateY(0)';
+                              }}
+                            >
+                              <span>{suggestion}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
 
-                {/* Loading / Streaming Indicator */}
+                {/* Modern Typing Wave Indicator */}
                 {isLoading && (
                   <div
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '0.55rem',
-                      color: '#94A3B8',
-                      fontSize: '0.8rem',
-                      padding: '0.25rem 0.5rem',
+                      gap: '0.65rem',
+                      background: 'rgba(30, 41, 59, 0.6)',
+                      border: '1px solid rgba(99, 102, 241, 0.25)',
+                      padding: '0.6rem 0.95rem',
+                      borderRadius: '16px',
+                      width: 'fit-content',
                     }}
                   >
-                    <div
-                      style={{
-                        width: '16px',
-                        height: '16px',
-                        border: '2px solid rgba(99, 102, 241, 0.25)',
-                        borderTopColor: '#818CF8',
-                        borderRadius: '50%',
-                        animation: 'spin 0.8s linear infinite',
-                      }}
-                    />
-                    <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
-                    <span>AI Assistant is analyzing & executing operations...</span>
+                    <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                      <span className="chatbot-typing-dot" style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#818CF8', animation: 'typingWave 1.4s infinite ease-in-out', animationDelay: '0ms' }} />
+                      <span className="chatbot-typing-dot" style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#818CF8', animation: 'typingWave 1.4s infinite ease-in-out', animationDelay: '200ms' }} />
+                      <span className="chatbot-typing-dot" style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#818CF8', animation: 'typingWave 1.4s infinite ease-in-out', animationDelay: '400ms' }} />
+                    </div>
+                    <span style={{ fontSize: '0.785rem', color: '#CBD5E1', fontWeight: 500 }}>
+                      AI Assistant is analyzing & executing operations...
+                    </span>
                   </div>
                 )}
 
@@ -872,7 +1287,7 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
                       gap: '0.5rem',
                     }}
                   >
-                    <span>Error: {error.message || 'Failed to connect to AI assistant.'}</span>
+                    <span>{error.message || 'The AI assistant encountered a processing error. Please try again.'}</span>
                     <button
                       onClick={() => reload()}
                       style={{
@@ -893,13 +1308,92 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
                 <div ref={messagesEndRef} />
               </div>
 
+              {/* Scroll to bottom button */}
+              {showScrollBottom && (
+                <button
+                  type="button"
+                  onClick={() => scrollToBottom('smooth')}
+                  title="Scroll to bottom"
+                  style={{
+                    position: 'absolute',
+                    bottom: '80px',
+                    right: '25px',
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '50%',
+                    background: 'rgba(30, 41, 59, 0.9)',
+                    border: '1px solid rgba(99, 102, 241, 0.4)',
+                    color: '#C7D2FE',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
+                    zIndex: 10,
+                  }}
+                >
+                  ↓
+                </button>
+              )}
+
+              {/* Quick Actions Scroll Bar (active during conversation) */}
+              {messages.length > 0 && (
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: '0.45rem',
+                    padding: '0.45rem 0.9rem',
+                    background: 'rgba(15, 23, 42, 0.85)',
+                    borderTop: '1px solid rgba(255, 255, 255, 0.05)',
+                    overflowX: 'auto',
+                    whiteSpace: 'nowrap',
+                    scrollbarWidth: 'none',
+                  }}
+                >
+                  {QUICK_BAR_PROMPTS.map((q, qIdx) => (
+                    <button
+                      key={qIdx}
+                      type="button"
+                      onClick={() => handleSuggestedClick(q.prompt)}
+                      style={{
+                        background: 'rgba(255, 255, 255, 0.04)',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        borderRadius: '999px',
+                        padding: '0.25rem 0.65rem',
+                        color: '#94A3B8',
+                        fontSize: '0.725rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.3rem',
+                        transition: 'all 0.15s ease',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.color = '#FFFFFF';
+                        e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.4)';
+                        e.currentTarget.style.background = 'rgba(99, 102, 241, 0.15)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.color = '#94A3B8';
+                        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                        e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)';
+                      }}
+                    >
+                      <span>{q.icon}</span>
+                      <span>{q.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {/* Chat Input Form */}
               <form
                 onSubmit={handleCustomSubmit}
                 style={{
-                  padding: '0.85rem 1rem',
+                  padding: '0.8rem 1rem',
                   borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-                  background: 'rgba(11, 15, 25, 0.85)',
+                  background: 'rgba(11, 15, 25, 0.9)',
                   display: 'flex',
                   gap: '0.5rem',
                   alignItems: 'center',
@@ -992,6 +1486,18 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
               </form>
             </>
           )}
+
+          {/* Keyframe animation styles */}
+          <style>{`
+            @keyframes chatbotSpin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+            @keyframes typingWave {
+              0%, 60%, 100% { transform: translateY(0); opacity: 0.35; }
+              30% { transform: translateY(-4px); opacity: 1; }
+            }
+          `}</style>
         </div>
       )}
     </>
