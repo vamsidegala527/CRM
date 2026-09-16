@@ -1,9 +1,9 @@
-from datetime import timedelta
+import os
+import secrets
+from datetime import datetime, timedelta
 # pyrefly: ignore [missing-import]
-from fastapi import APIRouter, Depends, HTTPException, status
-# pyrefly: ignore [missing-import]
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from sqlalchemy.orm import Session
-# pyrefly: ignore [missing-import]
 from sqlalchemy import func
 
 from google.oauth2 import id_token
@@ -11,14 +11,46 @@ from google.auth.transport import requests as google_requests
 
 from app.database import get_db
 from app.models import User
-from app.schemas import UserCreate, UserResponse, Token, UserLogin, GoogleAuthRequest
+from app.schemas import (
+    UserCreate, UserResponse, Token, UserLogin, GoogleAuthRequest,
+    VerifyEmailRequest, ResendVerificationRequest, ForgotPasswordRequest, ResetPasswordRequest
+)
 from app.auth import verify_password, get_password_hash, create_access_token, get_current_user
 from app.config import settings
+from app.rate_limiter import limiter, get_client_ip
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
+IS_PROD = (
+    os.getenv("ENVIRONMENT", "").lower() in ("production", "prod") or
+    os.getenv("RENDER", "").lower() == "true"
+)
+
+def set_auth_cookie(response: Response, token: str):
+    """Sets a secure HttpOnly, SameSite=Lax cookie containing the JWT access token."""
+    max_age = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    # True by default; in local dev HTTP it can be relaxed if explicitly configured
+    is_secure = os.getenv("COOKIE_SECURE", "false" if os.getenv("ENVIRONMENT") == "development" else "true").lower() == "true"
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        httponly=True,
+        secure=is_secure,
+        samesite="lax",
+        max_age=max_age,
+        path="/"
+    )
+
+@router.post("/register", response_model=dict, status_code=status.HTTP_201_CREATED)
+def register_user(
+    request: Request,
+    response: Response,
+    user_in: UserCreate,
+    db: Session = Depends(get_db)
+):
+    client_ip = get_client_ip(request)
+    limiter.check_rate_limit(f"register_ip:{client_ip}", max_requests=10, window_seconds=60, action="registration")
+
     email_clean = user_in.email.strip().lower()
     
     # Case-insensitive check for existing user
@@ -30,24 +62,150 @@ def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
         )
     
     hashed_pwd = get_password_hash(user_in.password)
+    verification_token = secrets.token_urlsafe(32)
+    verification_expires = datetime.utcnow() + timedelta(hours=24)
+
     db_user = User(
         email=email_clean,
         full_name=user_in.full_name,
         hashed_password=hashed_pwd,
-        is_active=True
+        is_active=True,
+        is_verified=False,
+        verification_token=verification_token,
+        verification_token_expires=verification_expires,
+        role="user"
     )
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
-    return db_user
+
+    return {
+        "message": "Account created successfully. Please verify your email.",
+        "user": UserResponse.model_validate(db_user),
+        "verification_token": verification_token if not IS_PROD else None
+    }
+
+
+@router.post("/verify-email", status_code=status.HTTP_200_OK)
+def verify_email(payload: VerifyEmailRequest, db: Session = Depends(get_db)):
+    """Verifies a user's email address using a valid verification token."""
+    clean_token = payload.token.strip()
+    user = db.query(User).filter(User.verification_token == clean_token).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or unrecognized verification token."
+        )
+    
+    if user.verification_token_expires and user.verification_token_expires < datetime.utcnow():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification token has expired. Please request a new verification code."
+        )
+
+    user.is_verified = True
+    user.verification_token = None
+    user.verification_token_expires = None
+    db.commit()
+    db.refresh(user)
+
+    return {"message": "Email verified successfully.", "is_verified": True}
+
+
+@router.post("/resend-verification", status_code=status.HTTP_200_OK)
+def resend_verification(request: Request, payload: ResendVerificationRequest, db: Session = Depends(get_db)):
+    """Generates and resends an email verification token."""
+    client_ip = get_client_ip(request)
+    limiter.check_rate_limit(f"resend_verify:{client_ip}", max_requests=5, window_seconds=300, action="verification resend")
+
+    email_clean = payload.email.strip().lower()
+    user = db.query(User).filter(func.lower(User.email) == email_clean).first()
+    
+    # Generic message to avoid email enumeration
+    result = {"message": "If this account is registered and unverified, a new verification code has been dispatched."}
+    
+    if user and not user.is_verified:
+        user.verification_token = secrets.token_urlsafe(32)
+        user.verification_token_expires = datetime.utcnow() + timedelta(hours=24)
+        db.commit()
+        if not IS_PROD:
+            result["verification_token"] = user.verification_token
+
+    return result
+
+
+@router.post("/forgot-password", status_code=status.HTTP_200_OK)
+def forgot_password(request: Request, payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """Generates a secure password reset token with 1-hour expiration."""
+    client_ip = get_client_ip(request)
+    limiter.check_rate_limit(f"forgot_pwd:{client_ip}", max_requests=5, window_seconds=300, action="password reset request")
+
+    email_clean = payload.email.strip().lower()
+    user = db.query(User).filter(func.lower(User.email) == email_clean).first()
+
+    result = {
+        "message": "If an account with that email address exists, password reset instructions have been generated."
+    }
+
+    if user and user.is_active:
+        reset_token = secrets.token_urlsafe(32)
+        user.reset_password_token = reset_token
+        user.reset_password_expires = datetime.utcnow() + timedelta(hours=1)
+        db.commit()
+        if not IS_PROD:
+            result["reset_token"] = reset_token
+
+    return result
+
+
+@router.post("/reset-password", status_code=status.HTTP_200_OK)
+def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """Resets user password using a valid reset token and terminates older active sessions."""
+    clean_token = payload.token.strip()
+    user = db.query(User).filter(User.reset_password_token == clean_token).first()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or unrecognized password reset token."
+        )
+
+    if user.reset_password_expires and user.reset_password_expires < datetime.utcnow():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password reset token has expired. Please request a new one."
+        )
+
+    user.hashed_password = get_password_hash(payload.new_password)
+    user.reset_password_token = None
+    user.reset_password_expires = None
+    # Session revocation: invalidate previous sessions on all devices
+    user.token_revoked_at = datetime.utcnow()
+    db.commit()
+
+    return {"message": "Password has been successfully updated. Please log in with your new password."}
 
 
 @router.post("/login", response_model=Token)
-def login_for_access_token(user_credentials: UserLogin, db: Session = Depends(get_db)):
+def login_for_access_token(
+    request: Request,
+    response: Response,
+    user_credentials: UserLogin,
+    db: Session = Depends(get_db)
+):
+    client_ip = get_client_ip(request)
     email_clean = user_credentials.email.strip().lower()
+
+    # Rate limiting and brute force lockout protection
+    limiter.check_rate_limit(f"login_ip:{client_ip}", max_requests=15, window_seconds=60, action="login")
+    limiter.check_lockout(f"email:{email_clean}")
+    limiter.check_lockout(f"ip:{client_ip}")
+
     user = db.query(User).filter(func.lower(User.email) == email_clean).first()
     
     if not user or not verify_password(user_credentials.password, user.hashed_password):
+        limiter.record_failure(f"email:{email_clean}")
+        limiter.record_failure(f"ip:{client_ip}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password.",
@@ -60,10 +218,18 @@ def login_for_access_token(user_credentials: UserLogin, db: Session = Depends(ge
             detail="Inactive account. Please contact system administrator."
         )
 
+    # Authentication succeeded: reset failure trackers
+    limiter.record_success(f"email:{email_clean}")
+    limiter.record_success(f"ip:{client_ip}")
+
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": user.email}, expires_delta=access_token_expires
     )
+
+    # Set secure HttpOnly cookie on response
+    set_auth_cookie(response, access_token)
+
     return {
         "access_token": access_token,
         "token_type": "bearer",
@@ -72,7 +238,15 @@ def login_for_access_token(user_credentials: UserLogin, db: Session = Depends(ge
 
 
 @router.post("/google", response_model=Token)
-def google_auth(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
+def google_auth(
+    request: Request,
+    response: Response,
+    payload: GoogleAuthRequest,
+    db: Session = Depends(get_db)
+):
+    client_ip = get_client_ip(request)
+    limiter.check_rate_limit(f"google_ip:{client_ip}", max_requests=20, window_seconds=60, action="Google authentication")
+
     if not payload.id_token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -114,6 +288,7 @@ def google_auth(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
         if user:
             # Account linking
             user.google_id = google_user_id
+            user.is_verified = True
             db.commit()
             db.refresh(user)
         else:
@@ -124,7 +299,9 @@ def google_auth(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
                 hashed_password=None,
                 google_id=google_user_id,
                 auth_provider="google",
-                is_active=True
+                role="user",
+                is_active=True,
+                is_verified=True
             )
             db.add(user)
             db.commit()
@@ -140,11 +317,44 @@ def google_auth(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
     access_token = create_access_token(
         data={"sub": user.email}, expires_delta=access_token_expires
     )
+
+    # Set secure HttpOnly cookie on response
+    set_auth_cookie(response, access_token)
+
     return {
         "access_token": access_token,
         "token_type": "bearer",
         "user": user
     }
+
+
+@router.post("/logout", status_code=status.HTTP_200_OK)
+def logout_user(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db)
+):
+    """
+    Terminates user session, records token revocation timestamp in DB,
+    and removes the HttpOnly access_token cookie.
+    """
+    try:
+        user = get_current_user(request=request, token=None, db=db)
+        if user:
+            user.token_revoked_at = datetime.utcnow()
+            db.commit()
+    except Exception:
+        pass  # Session already expired or missing; still clear cookie
+
+    is_secure = os.getenv("COOKIE_SECURE", "false" if os.getenv("ENVIRONMENT") == "development" else "true").lower() == "true"
+    response.delete_cookie(
+        key="access_token",
+        path="/",
+        httponly=True,
+        secure=is_secure,
+        samesite="lax"
+    )
+    return {"message": "Logged out successfully. Session invalidated."}
 
 
 @router.get("/me", response_model=UserResponse)

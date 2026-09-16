@@ -2,6 +2,7 @@ export type CustomerStatus = 'Active' | 'Lead' | 'Prospect' | 'Inactive';
 
 export interface Customer {
   id: number;
+  public_id?: string;
   name: string;
   email: string;
   phone?: string | null;
@@ -33,9 +34,12 @@ export interface CustomerListResponse {
 
 export interface User {
   id: number;
+  public_id?: string;
   email: string;
   full_name: string;
   is_active: boolean;
+  is_verified?: boolean;
+  role?: 'admin' | 'user';
   created_at: string;
 }
 

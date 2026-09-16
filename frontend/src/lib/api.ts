@@ -19,39 +19,31 @@ export function getApiBaseUrl(): string {
   return (envUrl || 'http://localhost:8000').replace(/\/+$/, '');
 }
 
+// In-memory token for ephemeral headers when available (token is securely stored in HttpOnly cookie)
+let inMemoryToken: string | null = null;
+
+// Wipe any legacy unsecure token from localStorage
+if (typeof window !== 'undefined') {
+  try {
+    localStorage.removeItem('access_token');
+  } catch (e) {}
+}
+
 export function getAuthToken(): string | null {
-  if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('access_token');
-    if (token && token !== 'null' && token !== 'undefined' && token !== 'Bearer null') {
-      return token;
-    }
-    
-    // Cookie fallback
-    const match = document.cookie.match(/(?:^|; )access_token=([^;]*)/);
-    if (match) {
-      const val = decodeURIComponent(match[1]);
-      if (val && val !== 'null' && val !== 'undefined') {
-        return val;
-      }
-    }
-  }
-  return null;
+  return inMemoryToken;
 }
 
 export function setAuthToken(token: string): void {
-  if (typeof window !== 'undefined') {
-    localStorage.setItem('access_token', token);
-    const secureFlag = window.location.protocol === 'https:' ? '; Secure' : '';
-    document.cookie = `access_token=${token}; path=/; max-age=86400; SameSite=Lax${secureFlag}`;
-  }
+  inMemoryToken = token;
 }
 
 export function removeAuthToken(): void {
+  inMemoryToken = null;
   if (typeof window !== 'undefined') {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('user_info');
-    const secureFlag = window.location.protocol === 'https:' ? '; Secure' : '';
-    document.cookie = `access_token=; path=/; max-age=0; SameSite=Lax${secureFlag}`;
+    try {
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('user_info');
+    } catch (e) {}
   }
 }
 
@@ -75,7 +67,16 @@ export function setStoredUser(user: User): void {
   }
 }
 
-async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+async function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function request<T>(
+  endpoint: string,
+  options: RequestInit = {},
+  timeoutMs: number = 18000,
+  retries: number = 2
+): Promise<T> {
   const token = getAuthToken();
   
   const headers: Record<string, string> = {
@@ -88,53 +89,89 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   }
 
   const baseUrl = getApiBaseUrl();
-  let response: Response;
-  try {
-    response = await fetch(`${baseUrl}${endpoint}`, {
-      ...options,
-      headers,
-    });
-  } catch (netErr: any) {
-    if (netErr.name === 'TypeError' || (netErr.message && netErr.message.includes('Failed to fetch'))) {
-      const displayHost = baseUrl || (typeof window !== 'undefined' ? window.location.origin : 'backend');
-      throw new Error(`Unable to reach the server at ${displayHost}. Please ensure the backend service is running and accessible.`);
-    }
-    throw netErr;
-  }
+  let attempt = 0;
+  let lastError: any = null;
 
-  if (!response.ok) {
-    let errorMessage = `API Error: ${response.statusText}`;
+  while (attempt <= retries) {
+    attempt++;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
     try {
-      const errData = await response.json();
-      if (errData && errData.detail) {
-        if (Array.isArray(errData.detail)) {
-          errorMessage = errData.detail
-            .map((item: any) => {
-              const msg = item.msg || JSON.stringify(item);
-              return msg.replace(/^Value error,\s*/i, '');
-            })
-            .join('. ');
-        } else if (typeof errData.detail === 'string') {
-          errorMessage = errData.detail;
-        } else {
-          errorMessage = JSON.stringify(errData.detail);
-        }
-      }
-    } catch (e) {
-      // Ignore JSON parse error
-    }
-    
-    if (response.status === 401 && typeof window !== 'undefined') {
-      removeAuthToken();
-      if (!window.location.pathname.startsWith('/login')) {
-        window.location.href = '/login';
-      }
-    }
+      const response = await fetch(`${baseUrl}${endpoint}`, {
+        ...options,
+        credentials: 'include', // Ensures browser automatically sends and receives secure HttpOnly cookies
+        headers,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
 
-    throw new Error(errorMessage);
+      // If backend is waking up (502 Bad Gateway or 504 Gateway Timeout), retry
+      if ([502, 503, 504].includes(response.status) && attempt <= retries) {
+        await wait(1500 * attempt);
+        continue;
+      }
+
+      if (!response.ok) {
+        let errorMessage = `API Error: ${response.statusText}`;
+        try {
+          const errData = await response.json();
+          if (errData && errData.detail) {
+            if (Array.isArray(errData.detail)) {
+              errorMessage = errData.detail
+                .map((item: any) => {
+                  const msg = item.msg || JSON.stringify(item);
+                  return msg.replace(/^Value error,\s*/i, '');
+                })
+                .join('. ');
+            } else if (typeof errData.detail === 'string') {
+              errorMessage = errData.detail;
+            } else {
+              errorMessage = JSON.stringify(errData.detail);
+            }
+          }
+        } catch (e) {
+          // Ignore JSON parse error
+        }
+        
+        if (response.status === 401 && typeof window !== 'undefined') {
+          removeAuthToken();
+          if (!window.location.pathname.startsWith('/login')) {
+            window.location.href = '/login';
+          }
+        }
+
+        throw new Error(errorMessage);
+      }
+
+      return await response.json();
+    } catch (netErr: any) {
+      clearTimeout(timeoutId);
+      lastError = netErr;
+
+      const isAbort = netErr.name === 'AbortError';
+      const isNetwork = netErr.name === 'TypeError' || (netErr.message && netErr.message.includes('Failed to fetch'));
+
+      // If network or timeout during cold start and attempts remain, back off and retry
+      if ((isAbort || isNetwork) && attempt <= retries) {
+        await wait(1500 * attempt);
+        continue;
+      }
+
+      if (isAbort) {
+        throw new Error(`Connection timed out after ${timeoutMs / 1000}s. The server may be cold-starting; please retry.`);
+      }
+
+      if (isNetwork) {
+        const displayHost = baseUrl || (typeof window !== 'undefined' ? window.location.origin : 'backend');
+        throw new Error(`Unable to reach the server at ${displayHost}. The backend may be cold-starting. Please wait a moment and retry.`);
+      }
+
+      throw netErr;
+    }
   }
 
-  return response.json();
+  throw lastError || new Error('Request failed after retries.');
 }
 
 export const api = {
@@ -159,11 +196,52 @@ export const api = {
     return res;
   },
 
-  async register(userData: { email: string; password: string; full_name: string }): Promise<User> {
-    return request<User>('/api/auth/register', {
+  async register(userData: { email: string; password: string; full_name: string }): Promise<any> {
+    return request<any>('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify(userData),
     });
+  },
+
+  async verifyEmail(token: string): Promise<{ message: string; is_verified: boolean }> {
+    return request<{ message: string; is_verified: boolean }>('/api/auth/verify-email', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    });
+  },
+
+  async resendVerification(email: string): Promise<{ message: string; verification_token?: string }> {
+    return request<{ message: string; verification_token?: string }>('/api/auth/resend-verification', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  async forgotPassword(email: string): Promise<{ message: string; reset_token?: string }> {
+    return request<{ message: string; reset_token?: string }>('/api/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  async resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
+    return request<{ message: string }>('/api/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ token, new_password: newPassword }),
+    });
+  },
+
+  async logout(): Promise<void> {
+    try {
+      await request('/api/auth/logout', { method: 'POST' });
+    } catch (e) {
+      // Clear client state even if network fails
+    }
+    removeAuthToken();
+    if (typeof window !== 'undefined') {
+      sessionStorage.clear();
+      window.location.href = '/login';
+    }
   },
 
   async getCurrentUser(): Promise<User> {
@@ -172,7 +250,7 @@ export const api = {
     return user;
   },
 
-  // Customer Management REST APIs
+  // Customer Management REST APIs (supports both numeric ID and UUID public_id)
   async getCustomers(params: { search?: string; status?: string; page?: number; limit?: number } = {}): Promise<CustomerListResponse> {
     const query = new URLSearchParams();
     if (params.search) query.append('search', params.search);
@@ -184,7 +262,7 @@ export const api = {
     return request<CustomerListResponse>(`/api/customers${queryString}`);
   },
 
-  async getCustomerById(id: number): Promise<Customer> {
+  async getCustomerById(id: number | string): Promise<Customer> {
     return request<Customer>(`/api/customers/${id}`);
   },
 
@@ -195,14 +273,23 @@ export const api = {
     });
   },
 
-  async updateCustomer(id: number, customer: Partial<CustomerInput>): Promise<Customer> {
+  // Partial update using PATCH (REST compliant)
+  async updateCustomer(id: number | string, customer: Partial<CustomerInput>): Promise<Customer> {
+    return request<Customer>(`/api/customers/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(customer),
+    });
+  },
+
+  // Full resource replacement using PUT
+  async replaceCustomer(id: number | string, customer: CustomerInput): Promise<Customer> {
     return request<Customer>(`/api/customers/${id}`, {
       method: 'PUT',
       body: JSON.stringify(customer),
     });
   },
 
-  async deleteCustomer(id: number): Promise<{ message: string }> {
+  async deleteCustomer(id: number | string): Promise<{ message: string }> {
     return request<{ message: string }>(`/api/customers/${id}`, {
       method: 'DELETE',
     });

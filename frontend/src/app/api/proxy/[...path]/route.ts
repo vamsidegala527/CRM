@@ -40,8 +40,24 @@ async function handler(request: NextRequest, { params }: { params: { path: strin
     const backendRes = await fetch(targetUrl, options);
     const resHeaders = new Headers();
     backendRes.headers.forEach((value, key) => {
-      resHeaders.set(key, value);
+      const k = key.toLowerCase();
+      if (k !== 'set-cookie') {
+        resHeaders.set(key, value);
+      }
     });
+
+    // Reliably forward all Set-Cookie headers
+    if (typeof (backendRes.headers as any).getSetCookie === 'function') {
+      const cookies = (backendRes.headers as any).getSetCookie();
+      for (const cookieStr of cookies) {
+        resHeaders.append('Set-Cookie', cookieStr);
+      }
+    } else {
+      const singleSetCookie = backendRes.headers.get('set-cookie');
+      if (singleSetCookie) {
+        resHeaders.set('Set-Cookie', singleSetCookie);
+      }
+    }
 
     const body = await backendRes.arrayBuffer();
     return new NextResponse(body, {

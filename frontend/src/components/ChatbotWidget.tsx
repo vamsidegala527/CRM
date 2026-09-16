@@ -583,13 +583,55 @@ function CustomerResultCard({
 }
 
 export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) {
-  const [isOpen, setIsIsOpen] = useState(false);
-  const [isMinimized, setIsMinimized] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isOpen, setIsIsOpen] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const state = JSON.parse(localStorage.getItem('crm_chat_widget_state') || '{}');
+        if (typeof state.isOpen === 'boolean') return state.isOpen;
+      } catch (e) {}
+    }
+    return false;
+  });
+  const [isMinimized, setIsMinimized] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const state = JSON.parse(localStorage.getItem('crm_chat_widget_state') || '{}');
+        if (typeof state.isMinimized === 'boolean') return state.isMinimized;
+      } catch (e) {}
+    }
+    return false;
+  });
+  const [isExpanded, setIsExpanded] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const state = JSON.parse(localStorage.getItem('crm_chat_widget_state') || '{}');
+        if (typeof state.isExpanded === 'boolean') return state.isExpanded;
+      } catch (e) {}
+    }
+    return false;
+  });
   const [input, setInput] = useState('');
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
+  const [isAvailable, setIsAvailable] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    fetch('/api/chat')
+      .then((res) => (res.ok ? res.json() : { available: false }))
+      .then((data) => {
+        if (isMounted) {
+          setIsAvailable(Boolean(data?.available));
+        }
+      })
+      .catch(() => {
+        if (isMounted) setIsAvailable(false);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -597,6 +639,18 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
 
   const chat: any = useChat({
     api: '/api/chat',
+    initialMessages: (() => {
+      if (typeof window !== 'undefined') {
+        try {
+          const saved = localStorage.getItem('crm_chat_history');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed)) return parsed;
+          }
+        } catch (e) {}
+      }
+      return [];
+    })(),
     headers: () => {
       const token = getAuthToken();
       return token ? { Authorization: `Bearer ${token}` } : {};
@@ -624,6 +678,44 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
     if (chat.handleSubmit) chat.handleSubmit(msg);
   });
   const reload: any = chat.reload || (() => {});
+
+  // Persist chat widget window state
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(
+          'crm_chat_widget_state',
+          JSON.stringify({ isOpen, isMinimized, isExpanded })
+        );
+      } catch (e) {}
+    }
+  }, [isOpen, isMinimized, isExpanded]);
+
+  // Fallback hydration for messages if initialMessages didn't populate
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('crm_chat_history');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0 && messages.length === 0) {
+            setMessages(parsed);
+          }
+        }
+      } catch (e) {}
+    }
+  }, []);
+
+  // Save chat conversation history to localStorage on update
+  useEffect(() => {
+    if (typeof window !== 'undefined' && messages && messages.length > 0) {
+      try {
+        localStorage.setItem('crm_chat_history', JSON.stringify(messages));
+      } catch (e) {
+        console.error('Failed to save chat history', e);
+      }
+    }
+  }, [messages]);
 
   const isLoading = status === 'submitted' || status === 'streaming' || chat.isLoading;
 
@@ -676,6 +768,9 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
   const handleClearChat = () => {
     setMessages([]);
     setShowClearConfirm(false);
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('crm_chat_history');
+    }
   };
 
   const handleConfirmDelete = (customerId: number, customerName: string) => {
@@ -725,6 +820,11 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
       return '';
     }
   };
+
+  // Remove / disable AI Assistant UI if backend is not available
+  if (!isAvailable) {
+    return null;
+  }
 
   return (
     <>

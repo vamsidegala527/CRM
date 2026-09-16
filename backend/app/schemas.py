@@ -54,6 +54,60 @@ def normalize_status(v: Optional[str]) -> str:
         return cap
     raise ValueError(f"Invalid status '{v}'. Allowed values: Active Customer, Sales Lead, Prospect, Inactive.")
 
+COMMON_WEAK_PASSWORDS = {
+    "password", "password123", "12345678", "123456789", "qwerty123", "admin123",
+    "welcome1", "letmein1", "iloveyou", "monkey123", "dragon123"
+}
+
+DANGEROUS_TAGS_REGEX = re.compile(
+    r"(<\s*(script|iframe|object|embed|style|applet|meta|link|svg|img|video|audio|form|input|button)[^>]*>.*?</\s*\2\s*>|"
+    r"<\s*(script|iframe|object|embed|style|applet|meta|link|svg|img|video|audio|form|input|button)[^>]*/>|"
+    r"<\s*(script|iframe|object|embed|style|applet|meta|link|svg|img|video|audio|form|input|button)[^>]*>|"
+    r"javascript\s*:|vbscript\s*:|data\s*:[^,]*,\s*<|"
+    r"on[a-z]+\s*=)",
+    re.IGNORECASE | re.DOTALL
+)
+
+def sanitize_input_text(v: Optional[str]) -> Optional[str]:
+    """
+    Sanitizes user input by stripping executable HTML/script injection tags,
+    event handlers (onload, onerror), and neutralizing malicious payload characters.
+    """
+    if v is None:
+        return None
+    if not isinstance(v, str):
+        return str(v)
+    
+    clean = v.strip()
+    if not clean:
+        return None
+        
+    prev = None
+    while prev != clean:
+        prev = clean
+        clean = DANGEROUS_TAGS_REGEX.sub("", clean).strip()
+
+    clean = clean.replace("<", "&lt;").replace(">", "&gt;")
+    return clean
+
+def validate_strong_password(v: str) -> str:
+    v = v.strip()
+    if len(v) < 8:
+        raise ValueError("Password must be at least 8 characters long.")
+    if len(v) > 72:
+        raise ValueError("Password cannot exceed 72 characters.")
+    if not re.search(r"[A-Z]", v):
+        raise ValueError("Password must contain at least one uppercase letter (A-Z).")
+    if not re.search(r"[a-z]", v):
+        raise ValueError("Password must contain at least one lowercase letter (a-z).")
+    if not re.search(r"\d", v):
+        raise ValueError("Password must contain at least one number (0-9).")
+    if not re.search(r"[!@#$%^&*(),.?\":{}|<>\-_=+[\]\\/;~`]", v):
+        raise ValueError("Password must contain at least one special character (e.g. !@#$%^&*).")
+    if v.lower() in COMMON_WEAK_PASSWORDS:
+        raise ValueError("Password is too common and insecure. Please choose a stronger password.")
+    return v
+
 # User Schemas
 class UserBase(BaseModel):
     email: EmailStr
@@ -76,17 +130,12 @@ class UserBase(BaseModel):
         return validate_name_string(v)
 
 class UserCreate(UserBase):
-    password: str = Field(..., min_length=6, max_length=72)
+    password: str = Field(..., min_length=8, max_length=72)
 
     @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
-        v = v.strip()
-        if len(v) < 6:
-            raise ValueError("Password must be at least 6 characters long.")
-        if len(v) > 72:
-            raise ValueError("Password cannot exceed 72 characters.")
-        return v
+        return validate_strong_password(v)
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -102,9 +151,30 @@ class UserLogin(BaseModel):
 class GoogleAuthRequest(BaseModel):
     id_token: str
 
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(..., min_length=1)
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=8, max_length=72)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        return validate_strong_password(v)
+
 class UserResponse(UserBase):
     id: int
+    public_id: Optional[str] = None
     is_active: bool
+    is_verified: bool = False
+    role: str = "user"
     created_at: datetime
     google_id: Optional[str] = None
     auth_provider: Optional[str] = "email"
@@ -150,7 +220,7 @@ class CustomerBase(BaseModel):
     @classmethod
     def clean_company(cls, v: Optional[str]) -> Optional[str]:
         if isinstance(v, str):
-            v = v.strip()
+            v = sanitize_input_text(v)
             if not v:
                 return None
             if len(v) > 100:
@@ -162,7 +232,7 @@ class CustomerBase(BaseModel):
     @classmethod
     def clean_address(cls, v: Optional[str]) -> Optional[str]:
         if isinstance(v, str):
-            v = v.strip()
+            v = sanitize_input_text(v)
             if not v:
                 return None
             if len(v) > 300:
@@ -174,7 +244,7 @@ class CustomerBase(BaseModel):
     @classmethod
     def clean_notes(cls, v: Optional[str]) -> Optional[str]:
         if isinstance(v, str):
-            v = v.strip()
+            v = sanitize_input_text(v)
             if not v:
                 return None
             if len(v) > 1000:
@@ -230,7 +300,7 @@ class CustomerUpdate(BaseModel):
     @classmethod
     def clean_company(cls, v: Optional[str]) -> Optional[str]:
         if isinstance(v, str):
-            v = v.strip()
+            v = sanitize_input_text(v)
             if not v:
                 return None
             if len(v) > 100:
@@ -242,7 +312,7 @@ class CustomerUpdate(BaseModel):
     @classmethod
     def clean_address(cls, v: Optional[str]) -> Optional[str]:
         if isinstance(v, str):
-            v = v.strip()
+            v = sanitize_input_text(v)
             if not v:
                 return None
             if len(v) > 300:
@@ -254,7 +324,7 @@ class CustomerUpdate(BaseModel):
     @classmethod
     def clean_notes(cls, v: Optional[str]) -> Optional[str]:
         if isinstance(v, str):
-            v = v.strip()
+            v = sanitize_input_text(v)
             if not v:
                 return None
             if len(v) > 1000:
@@ -276,6 +346,7 @@ class CustomerUpdate(BaseModel):
 
 class CustomerResponse(CustomerBase):
     id: int
+    public_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     owner_id: Optional[int] = None

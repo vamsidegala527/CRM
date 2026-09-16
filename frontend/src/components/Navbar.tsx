@@ -52,27 +52,57 @@ export default function Navbar({ user, onLogout }: NavbarProps) {
               Customer Hub
             </h1>
             <span style={{ fontSize: '0.75rem', color: 'var(--text-subtle)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-              <span className="pulse-dot"></span> Admin Control Center
+              <span className="pulse-dot"></span> {user?.role === 'admin' ? 'Admin Control Center' : 'Customer Workspace'}
             </span>
           </div>
         </div>
 
         {/* User Profile & Actions */}
         {user && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <span style={{
-              fontSize: '0.7rem',
-              fontWeight: '800',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-              padding: '0.2rem 0.6rem',
-              borderRadius: 'var(--radius-full)',
-              background: 'rgba(168, 85, 247, 0.2)',
-              color: '#C084FC',
-              border: '1px solid rgba(168, 85, 247, 0.4)'
-            }}>
-              👑 ADMIN
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            {user.role === 'admin' ? (
+              <span style={{
+                fontSize: '0.7rem',
+                fontWeight: '800',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                padding: '0.2rem 0.6rem',
+                borderRadius: 'var(--radius-full)',
+                background: 'rgba(168, 85, 247, 0.2)',
+                color: '#C084FC',
+                border: '1px solid rgba(168, 85, 247, 0.4)'
+              }}>
+                👑 ADMIN
+              </span>
+            ) : (
+              <span style={{
+                fontSize: '0.7rem',
+                fontWeight: '700',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                padding: '0.2rem 0.6rem',
+                borderRadius: 'var(--radius-full)',
+                background: 'rgba(99, 102, 241, 0.15)',
+                color: '#818CF8',
+                border: '1px solid rgba(99, 102, 241, 0.3)'
+              }}>
+                👤 USER
+              </span>
+            )}
+
+            {user.is_verified === false && (
+              <span style={{
+                fontSize: '0.68rem',
+                fontWeight: '600',
+                padding: '0.15rem 0.5rem',
+                borderRadius: 'var(--radius-full)',
+                background: 'rgba(234, 179, 8, 0.15)',
+                color: '#FACC15',
+                border: '1px solid rgba(234, 179, 8, 0.3)'
+              }}>
+                ⚠️ Unverified
+              </span>
+            )}
 
             <div style={{
               background: 'rgba(255, 255, 255, 0.05)',

@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Customer, CustomerInput, User } from '../types/customer';
-import { api } from '../lib/api';
+import { api, getStoredUser, setStoredUser, getAuthToken } from '../lib/api';
 import Navbar from '../components/Navbar';
 import CustomerList from '../components/CustomerList';
 import CustomerModal from '../components/CustomerModal';
@@ -13,18 +13,44 @@ import ChatbotWidget from '../components/ChatbotWidget';
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(() => getStoredUser());
   const [authChecking, setAuthChecking] = useState(true);
+  const [authElapsed, setAuthElapsed] = useState(0);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  // Email verification state
+  const [isVerifyingEmail, setIsVerifyingEmail] = useState(false);
+  const [showVerifyInput, setShowVerifyInput] = useState(false);
+  const [verifyTokenInput, setVerifyTokenInput] = useState('');
 
   // Customer Data State
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = sessionStorage.getItem('crm_page');
+      if (saved) {
+        const p = parseInt(saved, 10);
+        if (!isNaN(p) && p > 0) return p;
+      }
+    }
+    return 1;
+  });
   const [limit] = useState(10);
   
   // Search & Filter State
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('All');
+  const [search, setSearch] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem('crm_search') || '';
+    }
+    return '';
+  });
+  const [statusFilter, setStatusFilter] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem('crm_status_filter') || 'All';
+    }
+    return 'All';
+  });
   
   const [isLoading, setIsLoading] = useState(false);
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -41,6 +67,49 @@ export default function DashboardPage() {
   const [selectedCustomerForDelete, setSelectedCustomerForDelete] = useState<Customer | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Save search, statusFilter, page into sessionStorage to persist across reloads
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('crm_search', search);
+    }
+  }, [search]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('crm_status_filter', statusFilter);
+    }
+  }, [statusFilter]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('crm_page', page.toString());
+    }
+  }, [page]);
+
+  // Restore active modal state if user refreshed while modal was open
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const savedModal = sessionStorage.getItem('crm_active_modal');
+        if (savedModal) {
+          const parsed = JSON.parse(savedModal);
+          if (parsed.type === 'add') {
+            setSelectedCustomerForEdit(null);
+            setIsAddEditOpen(true);
+          } else if (parsed.type === 'edit' && parsed.customer) {
+            setSelectedCustomerForEdit(parsed.customer);
+            setIsAddEditOpen(true);
+          } else if (parsed.type === 'detail' && parsed.customer) {
+            setSelectedCustomerForDetail(parsed.customer);
+            setIsDetailOpen(true);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to restore modal state', err);
+      }
+    }
+  }, []);
+
   const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
     setNotification({ message, type });
     setTimeout(() => {
@@ -48,20 +117,76 @@ export default function DashboardPage() {
     }, 4000);
   };
 
-  // Auth Guard
+  // Cold start elapsed timer
   useEffect(() => {
-    async function checkAuth() {
-      try {
-        const user = await api.getCurrentUser();
-        setCurrentUser(user);
-      } catch (err) {
-        router.push('/login');
-      } finally {
-        setAuthChecking(false);
-      }
+    let timer: any;
+    if (authChecking) {
+      timer = setInterval(() => {
+        setAuthElapsed((prev) => prev + 1);
+      }, 1000);
+    } else {
+      setAuthElapsed(0);
     }
-    checkAuth();
+    return () => clearInterval(timer);
+  }, [authChecking]);
+
+  // Auth Guard with Cold Start & Retry Support
+  const checkAuth = useCallback(async () => {
+    setAuthError(null);
+    setAuthChecking(true);
+    try {
+      const user = await api.getCurrentUser();
+      setCurrentUser(user);
+      setStoredUser(user);
+      setAuthChecking(false);
+    } catch (err: any) {
+      if (err.status === 401 || err.message?.includes('401') || err.message?.includes('credentials')) {
+        router.push('/login');
+      } else {
+        setAuthError(err.message || 'Connection timed out. The backend server might be performing a cold start.');
+      }
+      setAuthChecking(false);
+    }
   }, [router]);
+
+  useEffect(() => {
+    checkAuth();
+  }, [checkAuth]);
+
+  // Email verification handlers
+  const handleResendVerification = async () => {
+    if (!currentUser?.email) return;
+    try {
+      setIsVerifyingEmail(true);
+      const res = await api.resendVerification(currentUser.email);
+      showNotification(res.message || 'Verification token sent! Check backend console or email.');
+    } catch (err: any) {
+      showNotification(err.message || 'Failed to resend verification token', 'error');
+    } finally {
+      setIsVerifyingEmail(false);
+    }
+  };
+
+  const handleVerifyEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!verifyTokenInput.trim()) return;
+    try {
+      setIsVerifyingEmail(true);
+      const res = await api.verifyEmail(verifyTokenInput.trim());
+      showNotification(res.message || 'Email verified successfully!');
+      if (currentUser) {
+        const updated = { ...currentUser, is_verified: true };
+        setCurrentUser(updated);
+        setStoredUser(updated);
+      }
+      setShowVerifyInput(false);
+      setVerifyTokenInput('');
+    } catch (err: any) {
+      showNotification(err.message || 'Verification token is invalid or expired', 'error');
+    } finally {
+      setIsVerifyingEmail(false);
+    }
+  };
 
   // Fetch Customers
   const fetchCustomers = useCallback(async () => {
@@ -92,11 +217,24 @@ export default function DashboardPage() {
   const handleOpenAdd = () => {
     setSelectedCustomerForEdit(null);
     setIsAddEditOpen(true);
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('crm_active_modal', JSON.stringify({ type: 'add' }));
+    }
   };
 
   const handleOpenEdit = (customer: Customer) => {
     setSelectedCustomerForEdit(customer);
     setIsAddEditOpen(true);
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('crm_active_modal', JSON.stringify({ type: 'edit', customer }));
+    }
+  };
+
+  const handleCloseAddEdit = () => {
+    setIsAddEditOpen(false);
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('crm_active_modal');
+    }
   };
 
   const handleSaveCustomer = async (data: CustomerInput) => {
@@ -109,6 +247,7 @@ export default function DashboardPage() {
         await api.createCustomer(data);
         showNotification(`New customer "${data.name}" created successfully.`);
       }
+      handleCloseAddEdit();
       fetchCustomers();
     } catch (err: any) {
       throw err;
@@ -120,6 +259,16 @@ export default function DashboardPage() {
   const handleOpenView = (customer: Customer) => {
     setSelectedCustomerForDetail(customer);
     setIsDetailOpen(true);
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('crm_active_modal', JSON.stringify({ type: 'detail', customer }));
+    }
+  };
+
+  const handleCloseDetail = () => {
+    setIsDetailOpen(false);
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('crm_active_modal');
+    }
   };
 
   const handleOpenDelete = (customer: Customer) => {
@@ -142,16 +291,120 @@ export default function DashboardPage() {
     }
   };
 
-  if (authChecking) {
+  if (authChecking && !currentUser) {
     return (
       <div style={{
         minHeight: '100vh',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        color: 'var(--text-muted)'
+        padding: '1.5rem',
+        background: 'radial-gradient(ellipse at 50% 30%, rgba(99, 102, 241, 0.15), transparent 70%)'
       }}>
-        Loading account...
+        <div className="glass-panel" style={{
+          maxWidth: '460px',
+          width: '100%',
+          padding: '2.5rem 2rem',
+          borderRadius: 'var(--radius-lg)',
+          textAlign: 'center',
+          boxShadow: 'var(--shadow-lg)',
+          border: '1px solid rgba(255, 255, 255, 0.1)'
+        }}>
+          <div style={{
+            width: '56px',
+            height: '56px',
+            borderRadius: '50%',
+            border: '3px solid rgba(99, 102, 241, 0.2)',
+            borderTopColor: '#6366F1',
+            margin: '0 auto 1.5rem',
+            animation: 'spin 1s linear infinite'
+          }} />
+          <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+          
+          <h3 style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--text-main)', marginBottom: '0.5rem' }}>
+            Connecting to Server...
+          </h3>
+          
+          <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', lineHeight: '1.6', marginBottom: '1.25rem' }}>
+            Cloud backends may take 15–30 seconds on cold starts. We are securing your session and waking up the services.
+          </p>
+
+          <div style={{
+            display: 'inline-block',
+            padding: '0.35rem 0.85rem',
+            borderRadius: 'var(--radius-full)',
+            background: 'rgba(99, 102, 241, 0.12)',
+            color: '#818CF8',
+            fontSize: '0.8rem',
+            fontWeight: '600',
+            marginBottom: '1.5rem'
+          }}>
+            ⏱️ Elapsed: {authElapsed}s
+          </div>
+
+          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+            <button
+              onClick={() => checkAuth()}
+              className="btn btn-primary"
+              style={{ fontSize: '0.85rem', padding: '0.55rem 1.15rem' }}
+            >
+              🔄 Retry Connection
+            </button>
+            <button
+              onClick={() => router.push('/login')}
+              className="btn btn-secondary"
+              style={{ fontSize: '0.85rem', padding: '0.55rem 1.15rem' }}
+            >
+              Go to Sign In
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (authError && !currentUser) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '1.5rem',
+      }}>
+        <div className="glass-panel" style={{
+          maxWidth: '460px',
+          width: '100%',
+          padding: '2.5rem 2rem',
+          borderRadius: 'var(--radius-lg)',
+          textAlign: 'center',
+          boxShadow: 'var(--shadow-lg)',
+          border: '1px solid rgba(244, 63, 94, 0.3)'
+        }}>
+          <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>⚠️</div>
+          <h3 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#F87171', marginBottom: '0.5rem' }}>
+            Backend Wake-Up / Connection Issue
+          </h3>
+          <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', lineHeight: '1.6', marginBottom: '1.5rem' }}>
+            {authError}
+          </p>
+          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+            <button
+              onClick={() => checkAuth()}
+              className="btn btn-primary"
+              style={{ fontSize: '0.85rem', padding: '0.6rem 1.25rem' }}
+            >
+              🔄 Retry Now
+            </button>
+            <button
+              onClick={() => router.push('/login')}
+              className="btn btn-secondary"
+              style={{ fontSize: '0.85rem', padding: '0.6rem 1.25rem' }}
+            >
+              Sign In
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -164,10 +417,89 @@ export default function DashboardPage() {
     <div style={{ minHeight: '100vh', paddingBottom: '3rem' }}>
       <Navbar
         user={currentUser}
-        onLogout={() => router.push('/login')}
+        onLogout={() => api.logout()}
       />
 
       <div className="container" style={{ marginTop: '2rem' }}>
+        {/* Unverified Email Warning Banner */}
+        {currentUser && currentUser.is_verified === false && (
+          <div style={{
+            background: 'linear-gradient(90deg, rgba(234, 179, 8, 0.15) 0%, rgba(245, 158, 11, 0.08) 100%)',
+            border: '1px solid rgba(234, 179, 8, 0.35)',
+            borderRadius: 'var(--radius-sm)',
+            padding: '0.85rem 1.25rem',
+            marginBottom: '1.5rem',
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '0.75rem'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+              <span style={{ fontSize: '1.1rem' }}>✉️</span>
+              <span style={{ fontSize: '0.875rem', color: '#FDE047' }}>
+                <strong>Email verification needed:</strong> Your account (<em>{currentUser.email}</em>) has not yet been verified.
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              {showVerifyInput ? (
+                <form onSubmit={handleVerifyEmail} style={{ display: 'flex', gap: '0.35rem' }}>
+                  <input
+                    type="text"
+                    placeholder="Enter token"
+                    value={verifyTokenInput}
+                    onChange={(e) => setVerifyTokenInput(e.target.value)}
+                    style={{
+                      padding: '0.3rem 0.65rem',
+                      fontSize: '0.8rem',
+                      background: 'rgba(0, 0, 0, 0.4)',
+                      border: '1px solid rgba(234, 179, 8, 0.4)',
+                      borderRadius: '4px',
+                      color: '#FFF',
+                      width: '180px'
+                    }}
+                    required
+                  />
+                  <button
+                    type="submit"
+                    disabled={isVerifyingEmail}
+                    className="btn btn-primary"
+                    style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem' }}
+                  >
+                    Confirm
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowVerifyInput(false)}
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.75rem', padding: '0.3rem 0.5rem' }}
+                  >
+                    Cancel
+                  </button>
+                </form>
+              ) : (
+                <>
+                  <button
+                    onClick={() => setShowVerifyInput(true)}
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem', borderColor: 'rgba(234, 179, 8, 0.4)', color: '#FDE047' }}
+                  >
+                    Enter Token
+                  </button>
+                  <button
+                    onClick={handleResendVerification}
+                    disabled={isVerifyingEmail}
+                    className="btn btn-primary"
+                    style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem', background: 'rgba(234, 179, 8, 0.25)', border: '1px solid rgba(234, 179, 8, 0.5)', color: '#FEF08A' }}
+                  >
+                    {isVerifyingEmail ? 'Sending...' : 'Resend Verification'}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
         {/* Notification Alert */}
         {notification && (
           <div style={{
@@ -292,7 +624,7 @@ export default function DashboardPage() {
       {/* Modals */}
       <CustomerModal
         isOpen={isAddEditOpen}
-        onClose={() => setIsAddEditOpen(false)}
+        onClose={handleCloseAddEdit}
         onSubmit={handleSaveCustomer}
         customer={selectedCustomerForEdit}
         isSubmitting={isSubmitting}
@@ -300,7 +632,7 @@ export default function DashboardPage() {
 
       <CustomerDetailModal
         isOpen={isDetailOpen}
-        onClose={() => setIsDetailOpen(false)}
+        onClose={handleCloseDetail}
         customer={selectedCustomerForDetail}
         onEdit={(cust) => handleOpenEdit(cust)}
       />

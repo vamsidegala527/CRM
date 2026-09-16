@@ -10,22 +10,42 @@ try:
 except Exception as e:
     print(f"PostgreSQL Table Creation Warning: {e}")
 
+IS_PROD = (
+    os.getenv("ENVIRONMENT", "").lower() in ("production", "prod") or
+    os.getenv("RENDER", "").lower() == "true" or
+    os.getenv("DISABLE_DOCS", "false").lower() == "true"
+)
+
 app = FastAPI(
     title="Customer Management REST API",
     description="Backend Python REST API for Customer Management with Admin Authentication and PostgreSQL",
-    version="1.2.0"
+    version="1.2.0",
+    docs_url=None if IS_PROD else "/docs",
+    redoc_url=None if IS_PROD else "/redoc",
+    openapi_url=None if IS_PROD else "/openapi.json"
 )
 
-# 1. Security Headers Middleware (OWASP defensive controls)
+# 1. Security Headers Middleware (OWASP defensive controls: HSTS, CSP, XSS, framing, and fingerprint stripping)
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     if request.method == "OPTIONS":
         return await call_next(request)
     response = await call_next(request)
+    
+    # Defensive security headers
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+    response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none';"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=(), payment=()"
+
+    # Strip technology and framework fingerprinting headers
+    for h in ["server", "Server", "x-powered-by", "X-Powered-By"]:
+        if h in response.headers:
+            del response.headers[h]
+
     return response
 
 # 2. Strict CORS Configuration
@@ -55,13 +75,15 @@ app.include_router(customers.router)
 
 @app.get("/")
 def read_root():
-    return {
+    data = {
         "status": "online",
         "message": "Customer Management REST API is running",
         "database": "PostgreSQL",
-        "auth": "Admin Authentication Required",
-        "docs_url": "/docs"
+        "auth": "Authentication Required"
     }
+    if not IS_PROD:
+        data["docs_url"] = "/docs"
+    return data
 
 @app.get("/api/health")
 def health_check():

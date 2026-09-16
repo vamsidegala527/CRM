@@ -101,6 +101,12 @@ export default function CustomerModal({
       }
     }
 
+    if (['notes', 'address', 'company'].includes(name) && value) {
+      if (/<script|javascript:|on[a-z]+\s*=/i.test(value)) {
+        return 'HTML tags, scripts, and event handlers are not allowed.';
+      }
+    }
+
     if (name === 'address' && value) {
       if (trimmed.length > 300) return 'Address cannot exceed 300 characters.';
     }

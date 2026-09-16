@@ -41,8 +41,18 @@ export default function CustomerDetailModal({
             <span className={`badge ${getStatusBadge(customer.status)}`}>
               {customer.status}
             </span>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-subtle)' }}>
-              ID: #{customer.id}
+            <span
+              style={{
+                fontSize: '0.75rem',
+                color: 'var(--text-subtle)',
+                fontFamily: 'monospace',
+                background: 'rgba(255, 255, 255, 0.05)',
+                padding: '2px 6px',
+                borderRadius: '4px'
+              }}
+              title={`Public ID: ${customer.public_id || customer.id}`}
+            >
+              UUID: {customer.public_id ? customer.public_id.slice(0, 8) + '...' : `#${customer.id}`}
             </span>
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '1.25rem', cursor: 'pointer' }}>

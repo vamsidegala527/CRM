@@ -384,3 +384,13 @@ CONVERSATION & RESPONSE GUIDELINES:
     );
   }
 }
+
+export async function GET() {
+  const groqKey = (process.env.GROQ_API_KEY || '').trim();
+  const geminiKey = (process.env.GEMINI_API_KEY || '').trim();
+  const isAvailable = Boolean(groqKey || geminiKey);
+  return Response.json({
+    available: isAvailable,
+    provider: groqKey ? 'groq' : geminiKey ? 'google' : null,
+  });
+}

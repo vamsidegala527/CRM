@@ -51,30 +51,48 @@ def get_customers(
     }
 
 
-@router.get("/{customer_id}", response_model=CustomerResponse)
-def get_customer_by_id(
-    customer_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Retrieve detailed customer record by ID owned by the authenticated user."""
-    if customer_id <= 0:
+def get_customer_or_404(db: Session, identifier: str, user_id: int) -> Customer:
+    """Safely retrieves a customer owned by user_id by either numeric ID or UUID public_id."""
+    clean_id = str(identifier).strip()
+    if not clean_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid customer ID. Must be a positive integer."
+            detail="Customer identifier cannot be empty."
         )
 
-    customer = db.query(Customer).filter(
-        Customer.id == customer_id,
-        Customer.owner_id == current_user.id
-    ).first()
+    if clean_id.isdigit():
+        int_id = int(clean_id)
+        if int_id <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid customer ID. Must be a positive integer or valid UUID."
+            )
+        customer = db.query(Customer).filter(
+            Customer.id == int_id,
+            Customer.owner_id == user_id
+        ).first()
+    else:
+        customer = db.query(Customer).filter(
+            Customer.public_id == clean_id,
+            Customer.owner_id == user_id
+        ).first()
+
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Customer with ID {customer_id} not found."
+            detail=f"Customer '{identifier}' not found."
         )
-
     return customer
+
+
+@router.get("/{customer_id}", response_model=CustomerResponse)
+def get_customer_by_id(
+    customer_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Retrieve detailed customer record by numeric ID or UUID owned by the authenticated user."""
+    return get_customer_or_404(db, customer_id, current_user.id)
 
 
 @router.post("", response_model=CustomerResponse, status_code=status.HTTP_201_CREATED)
@@ -111,32 +129,52 @@ def create_customer(
 
 
 @router.put("/{customer_id}", response_model=CustomerResponse)
-def update_customer(
-    customer_id: int,
+def replace_customer(
+    customer_id: str,
+    customer_in: CustomerCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Full update / replacement of an existing customer record owned by the authenticated user."""
+    customer = get_customer_or_404(db, customer_id, current_user.id)
+
+    new_email = customer_in.email.strip().lower()
+    if new_email != customer.email.lower():
+        existing = db.query(Customer).filter(
+            Customer.owner_id == current_user.id,
+            func.lower(Customer.email) == new_email
+        ).first()
+        if existing and existing.id != customer.id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"A customer with the email address '{new_email}' already exists in your account."
+            )
+
+    customer.name = customer_in.name
+    customer.email = new_email
+    customer.phone = customer_in.phone
+    customer.company = customer_in.company
+    customer.address = customer_in.address
+    customer.status = customer_in.status or "Active"
+    customer.notes = customer_in.notes
+
+    db.commit()
+    db.refresh(customer)
+    return customer
+
+
+@router.patch("/{customer_id}", response_model=CustomerResponse)
+def patch_customer(
+    customer_id: str,
     customer_in: CustomerUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Update an existing customer record owned by the authenticated user."""
-    if customer_id <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid customer ID. Must be a positive integer."
-        )
-
-    customer = db.query(Customer).filter(
-        Customer.id == customer_id,
-        Customer.owner_id == current_user.id
-    ).first()
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Customer with ID {customer_id} not found."
-        )
+    """Partial update of specific fields in an existing customer record owned by the authenticated user."""
+    customer = get_customer_or_404(db, customer_id, current_user.id)
 
     update_data = customer_in.model_dump(exclude_unset=True)
 
-    # Check for email duplicate under the authenticated user if email is being modified
     if "email" in update_data and update_data["email"]:
         new_email = update_data["email"].strip().lower()
         if new_email != customer.email.lower():
@@ -144,7 +182,7 @@ def update_customer(
                 Customer.owner_id == current_user.id,
                 func.lower(Customer.email) == new_email
             ).first()
-            if existing and existing.id != customer_id:
+            if existing and existing.id != customer.id:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=f"A customer with the email address '{new_email}' already exists in your account."
@@ -161,27 +199,14 @@ def update_customer(
 
 @router.delete("/{customer_id}", status_code=status.HTTP_200_OK)
 def delete_customer(
-    customer_id: int,
+    customer_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Delete a customer record owned by the authenticated user."""
-    if customer_id <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid customer ID. Must be a positive integer."
-        )
+    customer = get_customer_or_404(db, customer_id, current_user.id)
 
-    customer = db.query(Customer).filter(
-        Customer.id == customer_id,
-        Customer.owner_id == current_user.id
-    ).first()
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Customer with ID {customer_id} not found."
-        )
-
+    display_name = customer.name
     db.delete(customer)
     db.commit()
-    return {"message": f"Customer with ID {customer_id} deleted successfully."}
+    return {"message": f"Customer '{display_name}' deleted successfully."}
