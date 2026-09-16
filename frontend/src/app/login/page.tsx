@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Script from 'next/script';
-import { api, getAuthToken } from '../../lib/api';
+import { api } from '../../lib/api';
 
 declare global {
   interface Window {
@@ -17,28 +17,20 @@ export default function LoginPage() {
   // If already authenticated via HttpOnly cookie, redirect directly to dashboard
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      // Check if URL has email verification token
+      // Redirect email verification tokens or codes to dedicated verification page
       const urlParams = new URLSearchParams(window.location.search);
-      const verifyToken = urlParams.get('verify_token');
+      const verifyToken = urlParams.get('verify_token') || urlParams.get('code');
       if (verifyToken) {
-        api.verifyEmail(verifyToken)
-          .then((res) => {
-            setSuccessMsg(res.message || 'Email verified successfully! You can now sign in.');
-          })
-          .catch((err) => {
-            setError(err.message || 'Email verification link invalid or expired.');
-          });
+        router.replace(`/verify-email?code=${verifyToken}&email=${urlParams.get('email') || ''}`);
+        return;
       }
 
-      // Check if URL has password reset token
-      const resetTokenParam = urlParams.get('reset_token');
+      // Redirect password reset tokens to dedicated reset password page
+      const resetTokenParam = urlParams.get('reset_token') || urlParams.get('token');
       const emailParam = urlParams.get('email');
       if (resetTokenParam) {
-        setAuthMode('forgot');
-        setResetStep('reset');
-        setResetToken(resetTokenParam);
-        if (emailParam) setEmail(emailParam);
-        setSuccessMsg('Reset token detected from email link. Please choose your new password below.');
+        router.replace(`/reset-password?token=${resetTokenParam}&email=${emailParam || ''}`);
+        return;
       }
 
       api.getCurrentUser()
@@ -57,10 +49,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
 
-  // Password reset fields
-  const [resetToken, setResetToken] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [resetStep, setResetStep] = useState<'request' | 'reset'>('request');
+  // Password reset step (request link or link sent confirmation)
+  const [resetStep, setResetStep] = useState<'request' | 'sent'>('request');
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -161,43 +151,14 @@ export default function LoginPage() {
         await api.login({ email, password });
         router.push('/');
       } else if (authMode === 'forgot') {
-        if (resetStep === 'request') {
-          if (!email.trim()) {
-            setError('Please enter your account email.');
-            setLoading(false);
-            return;
-          }
-          const res = await api.forgotPassword(email);
-          setSuccessMsg(res.message || 'Password reset instructions have been sent to your registered email address.');
-          setResetStep('reset');
-        } else {
-          if (!resetToken.trim()) {
-            setError('Please enter your password reset token.');
-            setLoading(false);
-            return;
-          }
-          if (newPassword.length < 8) {
-            setError('New password must be at least 8 characters.');
-            setLoading(false);
-            return;
-          }
-          const hasUpper = /[A-Z]/.test(newPassword);
-          const hasLower = /[a-z]/.test(newPassword);
-          const hasDigit = /\d/.test(newPassword);
-          const hasSpecial = /[!@#$%^&*(),.?":{}|<>\-_=+[\]\\/;~`]/.test(newPassword);
-          if (!hasUpper || !hasLower || !hasDigit || !hasSpecial) {
-            setError('New password must contain uppercase, lowercase, number, and special character.');
-            setLoading(false);
-            return;
-          }
-
-          const res = await api.resetPassword(resetToken.trim(), newPassword);
-          setSuccessMsg(res.message || 'Password successfully reset! You may now sign in.');
-          setAuthMode('signin');
-          setResetStep('request');
-          setResetToken('');
-          setNewPassword('');
+        if (!email.trim()) {
+          setError('Please enter your registered account email.');
+          setLoading(false);
+          return;
         }
+        const res = await api.forgotPassword(email.trim());
+        setSuccessMsg(res.message || 'Password reset link sent! Please check your email.');
+        setResetStep('sent');
       }
     } catch (err: any) {
       setError(err.message || 'Authentication request failed.');
@@ -255,7 +216,9 @@ export default function LoginPage() {
             {authMode === 'register'
               ? 'Register to manage your isolated customer database'
               : authMode === 'forgot'
-                ? (resetStep === 'request' ? 'Request a secure password reset token' : 'Enter your reset token and new password')
+                ? (resetStep === 'request'
+                    ? 'Enter your registered email to receive a password-reset link'
+                    : 'Check your inbox for the reset link')
                 : 'Sign in to access your customer records'}
           </p>
         </div>
@@ -290,7 +253,65 @@ export default function LoginPage() {
           </div>
         )}
 
-        {/* Form */}
+        {authMode === 'forgot' && resetStep === 'sent' ? (
+          <div style={{ textAlign: 'center', padding: '1rem 0' }}>
+            <div style={{
+              width: '64px',
+              height: '64px',
+              borderRadius: '50%',
+              background: 'rgba(99, 102, 241, 0.15)',
+              border: '1px solid rgba(99, 102, 241, 0.3)',
+              color: '#818CF8',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '1.8rem',
+              margin: '0 auto 1.25rem'
+            }}>
+              ✉️
+            </div>
+            <h3 style={{ fontSize: '1.2rem', color: '#FFF', marginBottom: '0.65rem', fontWeight: 700 }}>
+              Password Reset Link Sent
+            </h3>
+            <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: '1.5rem' }}>
+              We have sent a secure password-reset link to <strong style={{ color: '#FFF' }}>{email}</strong>.
+              <br /><br />
+              Please open the link received in your email to open the password-reset page and choose your new password.
+            </p>
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ width: '100%', padding: '0.8rem', marginBottom: '0.75rem' }}
+              onClick={() => {
+                setAuthMode('signin');
+                setResetStep('request');
+                setError(null);
+                setSuccessMsg(null);
+              }}
+            >
+              Back to Sign In
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setResetStep('request');
+                setError(null);
+                setSuccessMsg(null);
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--primary)',
+                fontSize: '0.8rem',
+                cursor: 'pointer',
+                textDecoration: 'underline'
+              }}
+            >
+              Didn't receive email? Try again
+            </button>
+          </div>
+        ) : (
+        /* Form */
         <form onSubmit={handleSubmit}>
           {authMode === 'register' && (
             <div className="form-group">
@@ -334,35 +355,6 @@ export default function LoginPage() {
             </div>
           )}
 
-          {authMode === 'forgot' && resetStep === 'reset' && (
-            <>
-              <div className="form-group">
-                <label className="form-label">Reset Token</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="Paste 64-char reset token"
-                  value={resetToken}
-                  onChange={(e) => setResetToken(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">New Password</label>
-                <input
-                  type="password"
-                  className="form-control"
-                  placeholder="Enter new strong password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  required
-                />
-                <small style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '0.35rem', display: 'block' }}>
-                  Must be at least 8 characters with uppercase, lowercase, number, and symbol
-                </small>
-              </div>
-            </>
-          )}
 
           {authMode !== 'forgot' && (
             <div className="form-group">
@@ -471,33 +463,13 @@ export default function LoginPage() {
               : authMode === 'register'
                 ? 'Register'
                 : authMode === 'forgot'
-                  ? (resetStep === 'request' ? 'Send Reset Token' : 'Confirm New Password')
+                  ? 'Send Password Reset Link'
                   : 'Sign In'}
           </button>
         </form>
-
-        {/* Forgot Password helpers */}
-        {authMode === 'forgot' && (
-          <div style={{ marginTop: '1rem', textAlign: 'center', fontSize: '0.8rem' }}>
-            {resetStep === 'request' ? (
-              <button
-                type="button"
-                onClick={() => setResetStep('reset')}
-                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', textDecoration: 'underline' }}
-              >
-                Already have a reset token? Enter token
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setResetStep('request')}
-                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', textDecoration: 'underline' }}
-              >
-                Need to request token again?
-              </button>
-            )}
-          </div>
         )}
+
+
 
         {/* OR Separator & Google Sign-In Container (Only for Sign-In and Register) */}
         {authMode !== 'forgot' && (
@@ -522,44 +494,46 @@ export default function LoginPage() {
         )}
 
         {/* Toggle Mode */}
-        <div style={{
-          marginTop: '1.5rem',
-          textAlign: 'center',
-          fontSize: '0.85rem',
-          color: 'var(--text-muted)'
-        }}>
-          {authMode === 'register' ? (
-            <>
-              Already have an account?{' '}
+        {!(authMode === 'forgot' && resetStep === 'sent') && (
+          <div style={{
+            marginTop: '1.5rem',
+            textAlign: 'center',
+            fontSize: '0.85rem',
+            color: 'var(--text-muted)'
+          }}>
+            {authMode === 'register' ? (
+              <>
+                Already have an account?{' '}
+                <button
+                  type="button"
+                  onClick={() => { setAuthMode('signin'); setError(null); }}
+                  style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontWeight: '600' }}
+                >
+                  Sign In
+                </button>
+              </>
+            ) : authMode === 'forgot' ? (
               <button
                 type="button"
-                onClick={() => { setAuthMode('signin'); setError(null); }}
+                onClick={() => { setAuthMode('signin'); setError(null); setSuccessMsg(null); }}
                 style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontWeight: '600' }}
               >
-                Sign In
+                ← Back to Sign In
               </button>
-            </>
-          ) : authMode === 'forgot' ? (
-            <button
-              type="button"
-              onClick={() => { setAuthMode('signin'); setError(null); setSuccessMsg(null); }}
-              style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontWeight: '600' }}
-            >
-              ← Back to Sign In
-            </button>
-          ) : (
-            <>
-              Need a new account?{' '}
-              <button
-                type="button"
-                onClick={() => { setAuthMode('register'); setError(null); }}
-                style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontWeight: '600' }}
-              >
-                Register Here
-              </button>
-            </>
-          )}
-        </div>
+            ) : (
+              <>
+                Need a new account?{' '}
+                <button
+                  type="button"
+                  onClick={() => { setAuthMode('register'); setError(null); }}
+                  style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontWeight: '600' }}
+                >
+                  Register Here
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

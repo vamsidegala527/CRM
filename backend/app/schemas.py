@@ -1,7 +1,8 @@
 import re
-from typing import Optional, List
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, field_validator, Field, ConfigDict
+from typing import Optional, List, Any
+# pyrefly: ignore [missing-import]
+from pydantic import BaseModel, EmailStr, field_validator, model_validator, Field, ConfigDict
 
 VALID_STATUSES = {"Active", "Lead", "Prospect", "Inactive"}
 STATUS_MAP = {
@@ -152,7 +153,15 @@ class GoogleAuthRequest(BaseModel):
     id_token: str
 
 class VerifyEmailRequest(BaseModel):
-    token: str = Field(..., min_length=1)
+    token: Optional[str] = None
+    code: Optional[str] = None
+
+    @field_validator("token", "code", mode="before")
+    @classmethod
+    def clean_str(cls, v: Any) -> Optional[str]:
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
 class ResendVerificationRequest(BaseModel):
     email: EmailStr
@@ -163,11 +172,18 @@ class ForgotPasswordRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     token: str = Field(..., min_length=1)
     new_password: str = Field(..., min_length=8, max_length=72)
+    confirm_password: Optional[str] = None
 
     @field_validator("new_password")
     @classmethod
     def validate_password(cls, v: str) -> str:
         return validate_strong_password(v)
+
+    @model_validator(mode="after")
+    def verify_password_match(self):
+        if self.confirm_password is not None and self.new_password != self.confirm_password:
+            raise ValueError("Passwords do not match. Please confirm your new password.")
+        return self
 
 class UserResponse(UserBase):
     id: int

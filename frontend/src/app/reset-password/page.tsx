@@ -1,0 +1,349 @@
+'use client';
+
+import React, { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { api } from '../../lib/api';
+
+function ResetPasswordForm() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const rawToken = searchParams.get('token') || searchParams.get('reset_token') || '';
+  let tokenParam = '';
+  try {
+    tokenParam = decodeURIComponent(rawToken).trim();
+  } catch (e) {
+    tokenParam = rawToken.trim();
+  }
+  const emailParam = searchParams.get('email') || '';
+
+  const [token, setToken] = useState(tokenParam);
+  const [email, setEmail] = useState(emailParam);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cleanToken = '';
+    try {
+      cleanToken = decodeURIComponent(tokenParam).trim();
+    } catch (e) {
+      cleanToken = tokenParam.trim();
+    }
+    if (cleanToken) setToken(cleanToken);
+    if (emailParam) setEmail(emailParam);
+  }, [tokenParam, emailParam]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    if (!token.trim()) {
+      setError('Password reset link is missing a valid security token.');
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      setError('New password must be at least 8 characters.');
+      return;
+    }
+
+    const hasUpper = /[A-Z]/.test(newPassword);
+    const hasLower = /[a-z]/.test(newPassword);
+    const hasDigit = /\d/.test(newPassword);
+    const hasSpecial = /[!@#$%^&*(),.?":{}|<>\-_=+[\]\\/;~`]/.test(newPassword);
+
+    if (!hasUpper || !hasLower || !hasDigit || !hasSpecial) {
+      setError('Password must contain at least 1 uppercase letter, 1 lowercase letter, 1 number, and 1 special character.');
+      return;
+    }
+
+    if (!confirmPassword) {
+      setError('Please confirm your new password.');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setError('Passwords do not match. Please re-enter to confirm.');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const res = await api.resetPassword(token.trim(), newPassword, confirmPassword);
+      setIsSuccess(true);
+      setSuccessMsg(res.message || 'Password has been successfully updated. You may now log in.');
+    } catch (err: any) {
+      setError(err.message || 'Unable to reset password. The link may be expired or already used.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="glass-panel" style={{
+      width: '100%',
+      maxWidth: '440px',
+      padding: '2.5rem 2rem',
+      borderRadius: 'var(--radius-lg)',
+      boxShadow: 'var(--shadow-lg)'
+    }}>
+      {/* Header */}
+      <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+        <div style={{
+          width: '56px',
+          height: '56px',
+          borderRadius: 'var(--radius-md)',
+          background: 'linear-gradient(135deg, #6366F1 0%, #06B6D4 100%)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '1.5rem',
+          fontWeight: '800',
+          color: '#FFF',
+          margin: '0 auto 1rem',
+          boxShadow: '0 8px 24px rgba(99, 102, 241, 0.35)'
+        }}>
+          🔑
+        </div>
+        <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--text-main)', margin: '0 0 0.5rem' }}>
+          {isSuccess ? 'Password Reset Complete' : 'Reset Your Password'}
+        </h2>
+        <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+          {isSuccess
+            ? 'Your account password has been securely updated'
+            : email
+              ? `Enter and confirm a new strong password for ${email}`
+              : 'Enter and confirm a new strong password for your account'}
+        </p>
+      </div>
+
+      {/* Success View */}
+      {isSuccess ? (
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            background: 'rgba(16, 185, 129, 0.15)',
+            border: '1px solid rgba(16, 185, 129, 0.3)',
+            color: '#34D399',
+            padding: '1rem',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: '0.9rem',
+            lineHeight: 1.5,
+            marginBottom: '1.5rem'
+          }}>
+            {successMsg}
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary"
+            style={{ width: '100%', padding: '0.85rem' }}
+            onClick={() => router.push('/login')}
+          >
+            Sign In with New Password
+          </button>
+        </div>
+      ) : !token ? (
+        /* Missing Token Error View */
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            background: 'rgba(244, 63, 94, 0.15)',
+            border: '1px solid rgba(244, 63, 94, 0.3)',
+            color: '#F87171',
+            padding: '1rem',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: '0.88rem',
+            lineHeight: 1.5,
+            marginBottom: '1.5rem'
+          }}>
+            Missing or invalid password reset link. Please use the link sent to your registered email address.
+          </div>
+          <Link
+            href="/login"
+            className="btn btn-primary"
+            style={{ display: 'block', width: '100%', padding: '0.85rem', textAlign: 'center' }}
+          >
+            Return to Login
+          </Link>
+        </div>
+      ) : (
+        /* Form View */
+        <form onSubmit={handleSubmit}>
+          {error && (
+            <div style={{
+              background: 'rgba(244, 63, 94, 0.15)',
+              border: '1px solid rgba(244, 63, 94, 0.3)',
+              color: '#F87171',
+              padding: '0.85rem 1rem',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: '0.85rem',
+              marginBottom: '1.25rem',
+              lineHeight: 1.5
+            }}>
+              <div>{error}</div>
+              {error.toLowerCase().includes('invalid') && (
+                <div style={{ marginTop: '0.65rem' }}>
+                  <Link href="/login" style={{ color: '#FFF', textDecoration: 'underline', fontWeight: 600 }}>
+                    Click here to request a fresh reset link
+                  </Link>
+                </div>
+              )}
+            </div>
+          )}
+
+          {email && (
+            <div style={{
+              marginBottom: '1.25rem',
+              padding: '0.65rem 0.85rem',
+              background: 'rgba(99, 102, 241, 0.12)',
+              border: '1px solid rgba(99, 102, 241, 0.25)',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: '0.82rem',
+              color: '#C7D2FE',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem'
+            }}>
+              <span>👤</span>
+              <span>Account: <strong>{email}</strong></span>
+            </div>
+          )}
+
+          <div className="form-group">
+            <label className="form-label">New Password</label>
+            <input
+              type="password"
+              className="form-control"
+              placeholder="Enter new strong password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              required
+              autoFocus
+            />
+            <div style={{ marginTop: '0.45rem', fontSize: '0.75rem' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                <span style={{
+                  padding: '2px 7px',
+                  borderRadius: '4px',
+                  fontSize: '0.7rem',
+                  background: newPassword.length >= 8 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+                  color: newPassword.length >= 8 ? '#34D399' : 'var(--text-muted)',
+                  border: `1px solid ${newPassword.length >= 8 ? 'rgba(16, 185, 129, 0.4)' : 'var(--border-color)'}`
+                }}>
+                  {newPassword.length >= 8 ? '✓' : '•'} 8+ chars
+                </span>
+                <span style={{
+                  padding: '2px 7px',
+                  borderRadius: '4px',
+                  fontSize: '0.7rem',
+                  background: /[A-Z]/.test(newPassword) ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+                  color: /[A-Z]/.test(newPassword) ? '#34D399' : 'var(--text-muted)',
+                  border: `1px solid ${/[A-Z]/.test(newPassword) ? 'rgba(16, 185, 129, 0.4)' : 'var(--border-color)'}`
+                }}>
+                  {/[A-Z]/.test(newPassword) ? '✓' : '•'} Uppercase
+                </span>
+                <span style={{
+                  padding: '2px 7px',
+                  borderRadius: '4px',
+                  fontSize: '0.7rem',
+                  background: /[a-z]/.test(newPassword) ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+                  color: /[a-z]/.test(newPassword) ? '#34D399' : 'var(--text-muted)',
+                  border: `1px solid ${/[a-z]/.test(newPassword) ? 'rgba(16, 185, 129, 0.4)' : 'var(--border-color)'}`
+                }}>
+                  {/[a-z]/.test(newPassword) ? '✓' : '•'} Lowercase
+                </span>
+                <span style={{
+                  padding: '2px 7px',
+                  borderRadius: '4px',
+                  fontSize: '0.7rem',
+                  background: /\d/.test(newPassword) ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+                  color: /\d/.test(newPassword) ? '#34D399' : 'var(--text-muted)',
+                  border: `1px solid ${/\d/.test(newPassword) ? 'rgba(16, 185, 129, 0.4)' : 'var(--border-color)'}`
+                }}>
+                  {/\d/.test(newPassword) ? '✓' : '•'} Number
+                </span>
+                <span style={{
+                  padding: '2px 7px',
+                  borderRadius: '4px',
+                  fontSize: '0.7rem',
+                  background: /[!@#$%^&*(),.?":{}|<>\-_=+[\]\\/;~`]/.test(newPassword) ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+                  color: /[!@#$%^&*(),.?":{}|<>\-_=+[\]\\/;~`]/.test(newPassword) ? '#34D399' : 'var(--text-muted)',
+                  border: `1px solid ${/[!@#$%^&*(),.?":{}|<>\-_=+[\]\\/;~`]/.test(newPassword) ? 'rgba(16, 185, 129, 0.4)' : 'var(--border-color)'}`
+                }}>
+                  {/[!@#$%^&*(),.?":{}|<>\-_=+[\]\\/;~`]/.test(newPassword) ? '✓' : '•'} Symbol
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Confirm New Password</label>
+            <input
+              type="password"
+              className="form-control"
+              placeholder="Re-enter new password to confirm"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              required
+            />
+            {confirmPassword && (
+              <small style={{
+                color: confirmPassword === newPassword ? '#34D399' : '#F87171',
+                fontSize: '0.75rem',
+                marginTop: '0.35rem',
+                display: 'block',
+                fontWeight: 600
+              }}>
+                {confirmPassword === newPassword ? '✓ Passwords match' : '✕ Passwords do not match'}
+              </small>
+            )}
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="btn btn-primary"
+            style={{ width: '100%', padding: '0.85rem', marginTop: '0.75rem', fontSize: '0.95rem' }}
+          >
+            {loading ? 'Updating Password...' : 'Reset & Save Password'}
+          </button>
+
+          <div style={{ marginTop: '1.25rem', textAlign: 'center', fontSize: '0.82rem' }}>
+            <Link
+              href="/login"
+              style={{ color: 'var(--text-muted)', textDecoration: 'underline' }}
+            >
+              ← Back to Sign In
+            </Link>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <div style={{
+      minHeight: '100vh',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '1.5rem',
+      position: 'relative'
+    }}>
+      <Suspense fallback={
+        <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+          Loading password reset...
+        </div>
+      }>
+        <ResetPasswordForm />
+      </Suspense>
+    </div>
+  );
+}

@@ -20,6 +20,13 @@ services:
         value: "1440"
       - key: GOOGLE_CLIENT_ID
         value: 64576092611-tlgd7s6jcubbtmk94ho741tjebvjdtbo.apps.googleusercontent.com
+      - key: RESEND_API_KEY
+        sync: false
+      - key: FRONTEND_URL
+        fromService:
+          type: web
+          name: customer-frontend
+          property: url
 
   # Frontend Next.js Web Service
   - type: web

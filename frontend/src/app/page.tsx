@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Customer, CustomerInput, User } from '../types/customer';
-import { api, getStoredUser, setStoredUser, getAuthToken } from '../lib/api';
+import { api, getStoredUser, setStoredUser } from '../lib/api';
 import Navbar from '../components/Navbar';
 import CustomerList from '../components/CustomerList';
 import CustomerModal from '../components/CustomerModal';
@@ -159,7 +159,7 @@ export default function DashboardPage() {
     try {
       setIsVerifyingEmail(true);
       const res = await api.resendVerification(currentUser.email);
-      showNotification(res.message || 'Verification token sent! Check backend console or email.');
+      showNotification(res.message || 'Verification email sent! Please check your inbox to verify your account.');
     } catch (err: any) {
       showNotification(err.message || 'Failed to resend verification token', 'error');
     } finally {
@@ -447,23 +447,30 @@ export default function DashboardPage() {
                 <form onSubmit={handleVerifyEmail} style={{ display: 'flex', gap: '0.35rem' }}>
                   <input
                     type="text"
-                    placeholder="Enter token"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={6}
+                    placeholder="6-digit code"
                     value={verifyTokenInput}
-                    onChange={(e) => setVerifyTokenInput(e.target.value)}
+                    onChange={(e) => setVerifyTokenInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
                     style={{
                       padding: '0.3rem 0.65rem',
-                      fontSize: '0.8rem',
+                      fontSize: '0.88rem',
+                      fontWeight: 600,
+                      letterSpacing: '3px',
+                      textAlign: 'center',
+                      fontFamily: 'monospace',
                       background: 'rgba(0, 0, 0, 0.4)',
                       border: '1px solid rgba(234, 179, 8, 0.4)',
                       borderRadius: '4px',
                       color: '#FFF',
-                      width: '180px'
+                      width: '130px'
                     }}
                     required
                   />
                   <button
                     type="submit"
-                    disabled={isVerifyingEmail}
+                    disabled={isVerifyingEmail || verifyTokenInput.trim().length !== 6}
                     className="btn btn-primary"
                     style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem' }}
                   >
@@ -485,7 +492,7 @@ export default function DashboardPage() {
                     className="btn btn-secondary"
                     style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem', borderColor: 'rgba(234, 179, 8, 0.4)', color: '#FDE047' }}
                   >
-                    Enter Token
+                    Enter Code
                   </button>
                   <button
                     onClick={handleResendVerification}
@@ -493,7 +500,7 @@ export default function DashboardPage() {
                     className="btn btn-primary"
                     style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem', background: 'rgba(234, 179, 8, 0.25)', border: '1px solid rgba(234, 179, 8, 0.5)', color: '#FEF08A' }}
                   >
-                    {isVerifyingEmail ? 'Sending...' : 'Resend Verification'}
+                    {isVerifyingEmail ? 'Sending...' : 'Resend Code'}
                   </button>
                 </>
               )}

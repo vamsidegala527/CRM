@@ -3,10 +3,14 @@ import secrets
 from datetime import datetime, timedelta
 # pyrefly: ignore [missing-import]
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
+# pyrefly: ignore [missing-import]
 from sqlalchemy.orm import Session
+# pyrefly: ignore [missing-import]
 from sqlalchemy import func
 
+# pyrefly: ignore [missing-import]
 from google.oauth2 import id_token
+# pyrefly: ignore [missing-import]
 from google.auth.transport import requests as google_requests
 
 from app.database import get_db
@@ -63,7 +67,8 @@ def register_user(
         )
     
     hashed_pwd = get_password_hash(user_in.password)
-    verification_token = secrets.token_urlsafe(32)
+    # Generate secure 6-digit verification code
+    verification_code = f"{secrets.randbelow(1000000):06d}"
     verification_expires = datetime.utcnow() + timedelta(hours=24)
 
     db_user = User(
@@ -72,7 +77,7 @@ def register_user(
         hashed_password=hashed_pwd,
         is_active=True,
         is_verified=False,
-        verification_token=verification_token,
+        verification_token=verification_code,
         verification_token_expires=verification_expires,
         role="user"
     )
@@ -81,32 +86,47 @@ def register_user(
     db.refresh(db_user)
 
     try:
-        send_verification_email(db_user.email, db_user.full_name or "User", verification_token)
+        send_verification_email(db_user.email, db_user.full_name or "User", verification_code)
     except EmailDeliveryError as email_err:
         print(f"⚠️ Verification email delivery notice: {email_err}")
 
     return {
-        "message": f"Account created successfully. Verification email sent to {db_user.email}.",
+        "message": f"Account created successfully. Verification code sent to {db_user.email}.",
         "user": UserResponse.model_validate(db_user),
-        "verification_token": verification_token if not IS_PROD else None
+        "verification_token": verification_code if not IS_PROD else None
     }
 
 
 @router.post("/verify-email", status_code=status.HTTP_200_OK)
-def verify_email(payload: VerifyEmailRequest, db: Session = Depends(get_db)):
-    """Verifies a user's email address using a valid verification token."""
-    clean_token = payload.token.strip()
-    user = db.query(User).filter(User.verification_token == clean_token).first()
+def verify_email(request: Request, payload: VerifyEmailRequest, db: Session = Depends(get_db)):
+    """Verifies a user's email address using a valid 6-digit verification code or token."""
+    client_ip = get_client_ip(request)
+    limiter.check_rate_limit(f"verify_ip:{client_ip}", max_requests=10, window_seconds=300, action="verification attempt")
+
+    import urllib.parse
+    raw_code = (payload.code or payload.token or "").strip()
+    if not raw_code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification code is required."
+        )
+
+    clean_code = raw_code
+    unquoted_code = urllib.parse.unquote(clean_code).strip()
+
+    user = db.query(User).filter(
+        (User.verification_token == clean_code) | (User.verification_token == unquoted_code)
+    ).first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or unrecognized verification token."
+            detail="Invalid or unrecognized verification code."
         )
     
     if user.verification_token_expires and user.verification_token_expires < datetime.utcnow():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Verification token has expired. Please request a new verification code."
+            detail="Verification code has expired. Please request a new verification code."
         )
 
     user.is_verified = True
@@ -115,12 +135,12 @@ def verify_email(payload: VerifyEmailRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
 
-    return {"message": "Email verified successfully.", "is_verified": True}
+    return {"message": "Email verified successfully.", "is_verified": True, "email": user.email}
 
 
 @router.post("/resend-verification", status_code=status.HTTP_200_OK)
 def resend_verification(request: Request, payload: ResendVerificationRequest, db: Session = Depends(get_db)):
-    """Generates and resends an email verification token to a registered user."""
+    """Generates and resends a 6-digit email verification code to a registered user."""
     client_ip = get_client_ip(request)
     limiter.check_rate_limit(f"resend_verify:{client_ip}", max_requests=5, window_seconds=300, action="verification resend")
 
@@ -136,13 +156,13 @@ def resend_verification(request: Request, payload: ResendVerificationRequest, db
     if user.is_verified:
         return {"message": "This email address is already verified."}
 
-    verification_token = secrets.token_urlsafe(32)
-    user.verification_token = verification_token
+    verification_code = f"{secrets.randbelow(1000000):06d}"
+    user.verification_token = verification_code
     user.verification_token_expires = datetime.utcnow() + timedelta(hours=24)
     db.commit()
 
     try:
-        send_verification_email(user.email, user.full_name or "User", verification_token)
+        send_verification_email(user.email, user.full_name or "User", verification_code)
     except EmailDeliveryError as email_err:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -151,7 +171,7 @@ def resend_verification(request: Request, payload: ResendVerificationRequest, db
 
     return {
         "message": f"Verification email successfully sent to {user.email}.",
-        "verification_token": verification_token if not IS_PROD else None
+        "verification_token": verification_code if not IS_PROD else None
     }
 
 
@@ -190,21 +210,26 @@ def forgot_password(request: Request, payload: ForgotPasswordRequest, db: Sessio
         )
 
     return {
-        "message": f"Password reset instructions have been sent to {user.email}.",
-        "reset_token": reset_token if not IS_PROD else None
+        "message": f"A password reset link has been sent to {user.email}. Please check your email to reset your password."
     }
 
 
 @router.post("/reset-password", status_code=status.HTTP_200_OK)
 def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
     """Resets user password using a valid reset token and terminates older active sessions."""
+    import urllib.parse
     clean_token = payload.token.strip()
-    user = db.query(User).filter(User.reset_password_token == clean_token).first()
+    unquoted_token = urllib.parse.unquote(clean_token).strip()
+
+    user = db.query(User).filter(
+        (User.reset_password_token == clean_token) | (User.reset_password_token == unquoted_token)
+    ).first()
     
     if not user:
+        print(f"❌ [RESET-PWD] Token not found in DB. Received: {repr(clean_token)}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or unrecognized password reset token."
+            detail="Invalid or unrecognized password reset token. If you requested a reset multiple times, please use the newest link in your email, or request a fresh link."
         )
 
     if user.reset_password_expires and user.reset_password_expires < datetime.utcnow():

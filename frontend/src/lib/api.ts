@@ -203,10 +203,10 @@ export const api = {
     });
   },
 
-  async verifyEmail(token: string): Promise<{ message: string; is_verified: boolean }> {
-    return request<{ message: string; is_verified: boolean }>('/api/auth/verify-email', {
+  async verifyEmail(codeOrToken: string): Promise<{ message: string; is_verified: boolean; email?: string }> {
+    return request<{ message: string; is_verified: boolean; email?: string }>('/api/auth/verify-email', {
       method: 'POST',
-      body: JSON.stringify({ token }),
+      body: JSON.stringify({ code: codeOrToken, token: codeOrToken }),
     });
   },
 
@@ -224,10 +224,14 @@ export const api = {
     });
   },
 
-  async resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
+  async resetPassword(token: string, newPassword: string, confirmPassword?: string): Promise<{ message: string }> {
     return request<{ message: string }>('/api/auth/reset-password', {
       method: 'POST',
-      body: JSON.stringify({ token, new_password: newPassword }),
+      body: JSON.stringify({
+        token,
+        new_password: newPassword,
+        confirm_password: confirmPassword || newPassword,
+      }),
     });
   },
 
