@@ -18,6 +18,7 @@ from app.schemas import (
 from app.auth import verify_password, get_password_hash, create_access_token, get_current_user
 from app.config import settings
 from app.rate_limiter import limiter, get_client_ip
+from app.email_service import send_verification_email, send_password_reset_email, EmailDeliveryError
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
@@ -79,8 +80,13 @@ def register_user(
     db.commit()
     db.refresh(db_user)
 
+    try:
+        send_verification_email(db_user.email, db_user.full_name or "User", verification_token)
+    except EmailDeliveryError as email_err:
+        print(f"⚠️ Verification email delivery notice: {email_err}")
+
     return {
-        "message": "Account created successfully. Please verify your email.",
+        "message": f"Account created successfully. Verification email sent to {db_user.email}.",
         "user": UserResponse.model_validate(db_user),
         "verification_token": verification_token if not IS_PROD else None
     }
@@ -114,48 +120,79 @@ def verify_email(payload: VerifyEmailRequest, db: Session = Depends(get_db)):
 
 @router.post("/resend-verification", status_code=status.HTTP_200_OK)
 def resend_verification(request: Request, payload: ResendVerificationRequest, db: Session = Depends(get_db)):
-    """Generates and resends an email verification token."""
+    """Generates and resends an email verification token to a registered user."""
     client_ip = get_client_ip(request)
     limiter.check_rate_limit(f"resend_verify:{client_ip}", max_requests=5, window_seconds=300, action="verification resend")
 
     email_clean = payload.email.strip().lower()
     user = db.query(User).filter(func.lower(User.email) == email_clean).first()
     
-    # Generic message to avoid email enumeration
-    result = {"message": "If this account is registered and unverified, a new verification code has been dispatched."}
-    
-    if user and not user.is_verified:
-        user.verification_token = secrets.token_urlsafe(32)
-        user.verification_token_expires = datetime.utcnow() + timedelta(hours=24)
-        db.commit()
-        if not IS_PROD:
-            result["verification_token"] = user.verification_token
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Email address not found."
+        )
 
-    return result
+    if user.is_verified:
+        return {"message": "This email address is already verified."}
+
+    verification_token = secrets.token_urlsafe(32)
+    user.verification_token = verification_token
+    user.verification_token_expires = datetime.utcnow() + timedelta(hours=24)
+    db.commit()
+
+    try:
+        send_verification_email(user.email, user.full_name or "User", verification_token)
+    except EmailDeliveryError as email_err:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Unable to send verification email: {str(email_err)}"
+        )
+
+    return {
+        "message": f"Verification email successfully sent to {user.email}.",
+        "verification_token": verification_token if not IS_PROD else None
+    }
 
 
 @router.post("/forgot-password", status_code=status.HTTP_200_OK)
 def forgot_password(request: Request, payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
-    """Generates a secure password reset token with 1-hour expiration."""
+    """Generates a secure password reset token and sends a reset email to the registered address."""
     client_ip = get_client_ip(request)
     limiter.check_rate_limit(f"forgot_pwd:{client_ip}", max_requests=5, window_seconds=300, action="password reset request")
 
     email_clean = payload.email.strip().lower()
     user = db.query(User).filter(func.lower(User.email) == email_clean).first()
 
-    result = {
-        "message": "If an account with that email address exists, password reset instructions have been generated."
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Email address not found."
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account is inactive. Please contact support."
+        )
+
+    reset_token = secrets.token_urlsafe(32)
+    user.reset_password_token = reset_token
+    user.reset_password_expires = datetime.utcnow() + timedelta(hours=1)
+    db.commit()
+
+    try:
+        send_password_reset_email(user.email, user.full_name or "User", reset_token)
+    except EmailDeliveryError as email_err:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Unable to send password reset email: {str(email_err)}"
+        )
+
+    return {
+        "message": f"Password reset instructions have been sent to {user.email}.",
+        "reset_token": reset_token if not IS_PROD else None
     }
-
-    if user and user.is_active:
-        reset_token = secrets.token_urlsafe(32)
-        user.reset_password_token = reset_token
-        user.reset_password_expires = datetime.utcnow() + timedelta(hours=1)
-        db.commit()
-        if not IS_PROD:
-            result["reset_token"] = reset_token
-
-    return result
 
 
 @router.post("/reset-password", status_code=status.HTTP_200_OK)

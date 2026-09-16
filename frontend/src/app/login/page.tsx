@@ -30,6 +30,17 @@ export default function LoginPage() {
           });
       }
 
+      // Check if URL has password reset token
+      const resetTokenParam = urlParams.get('reset_token');
+      const emailParam = urlParams.get('email');
+      if (resetTokenParam) {
+        setAuthMode('forgot');
+        setResetStep('reset');
+        setResetToken(resetTokenParam);
+        if (emailParam) setEmail(emailParam);
+        setSuccessMsg('Reset token detected from email link. Please choose your new password below.');
+      }
+
       api.getCurrentUser()
         .then(() => {
           router.replace('/');
@@ -157,7 +168,7 @@ export default function LoginPage() {
             return;
           }
           const res = await api.forgotPassword(email);
-          setSuccessMsg(res.message || 'Password reset token generated. Check your email or console.');
+          setSuccessMsg(res.message || 'Password reset instructions have been sent to your registered email address.');
           setResetStep('reset');
         } else {
           if (!resetToken.trim()) {
