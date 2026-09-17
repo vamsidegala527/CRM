@@ -13,7 +13,8 @@ import ChatbotWidget from '../components/ChatbotWidget';
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [currentUser, setCurrentUser] = useState<User | null>(() => getStoredUser());
+  const [mounted, setMounted] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
   const [authElapsed, setAuthElapsed] = useState(0);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -26,31 +27,12 @@ export default function DashboardPage() {
   // Customer Data State
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const saved = sessionStorage.getItem('crm_page');
-      if (saved) {
-        const p = parseInt(saved, 10);
-        if (!isNaN(p) && p > 0) return p;
-      }
-    }
-    return 1;
-  });
+  const [page, setPage] = useState(1);
   const [limit] = useState(10);
   
   // Search & Filter State
-  const [search, setSearch] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return sessionStorage.getItem('crm_search') || '';
-    }
-    return '';
-  });
-  const [statusFilter, setStatusFilter] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return sessionStorage.getItem('crm_status_filter') || 'All';
-    }
-    return 'All';
-  });
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('All');
   
   const [isLoading, setIsLoading] = useState(false);
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -67,28 +49,48 @@ export default function DashboardPage() {
   const [selectedCustomerForDelete, setSelectedCustomerForDelete] = useState<Customer | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Hydration safety & restore state from client storage
+  useEffect(() => {
+    setMounted(true);
+    const stored = getStoredUser();
+    if (stored) {
+      setCurrentUser(stored);
+    }
+    if (typeof window !== 'undefined') {
+      const savedSearch = sessionStorage.getItem('crm_search');
+      if (savedSearch) setSearch(savedSearch);
+      const savedFilter = sessionStorage.getItem('crm_status_filter');
+      if (savedFilter) setStatusFilter(savedFilter);
+      const savedPage = sessionStorage.getItem('crm_page');
+      if (savedPage) {
+        const p = parseInt(savedPage, 10);
+        if (!isNaN(p) && p > 0) setPage(p);
+      }
+    }
+  }, []);
+
   // Save search, statusFilter, page into sessionStorage to persist across reloads
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && mounted) {
       sessionStorage.setItem('crm_search', search);
     }
-  }, [search]);
+  }, [search, mounted]);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && mounted) {
       sessionStorage.setItem('crm_status_filter', statusFilter);
     }
-  }, [statusFilter]);
+  }, [statusFilter, mounted]);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && mounted) {
       sessionStorage.setItem('crm_page', page.toString());
     }
-  }, [page]);
+  }, [page, mounted]);
 
   // Restore active modal state if user refreshed while modal was open
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && mounted) {
       try {
         const savedModal = sessionStorage.getItem('crm_active_modal');
         if (savedModal) {
@@ -108,7 +110,7 @@ export default function DashboardPage() {
         console.error('Failed to restore modal state', err);
       }
     }
-  }, []);
+  }, [mounted]);
 
   const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
     setNotification({ message, type });
@@ -150,8 +152,14 @@ export default function DashboardPage() {
   }, [router]);
 
   useEffect(() => {
+    if (!mounted) return;
+    const stored = getStoredUser();
+    if (!stored) {
+      router.push('/login');
+      return;
+    }
     checkAuth();
-  }, [checkAuth]);
+  }, [mounted, checkAuth, router]);
 
   // Email verification handlers
   const handleResendVerification = async () => {
@@ -291,7 +299,54 @@ export default function DashboardPage() {
     }
   };
 
+  if (!mounted) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'var(--bg-main, #0B0F19)',
+      }}>
+        <div style={{
+          width: '36px',
+          height: '36px',
+          border: '3px solid rgba(99, 102, 241, 0.2)',
+          borderTopColor: '#6366F1',
+          borderRadius: '50%',
+          animation: 'spin 0.8s linear infinite'
+        }} />
+        <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
   if (authChecking && !currentUser) {
+    if (authElapsed < 3) {
+      return (
+        <div style={{
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'var(--bg-main, #0B0F19)',
+          gap: '1rem'
+        }}>
+          <div style={{
+            width: '40px',
+            height: '40px',
+            border: '3px solid rgba(99, 102, 241, 0.2)',
+            borderTopColor: '#6366F1',
+            borderRadius: '50%',
+            animation: 'spin 0.8s linear infinite'
+          }} />
+          <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Securing session...</p>
+        </div>
+      );
+    }
+
     return (
       <div style={{
         minHeight: '100vh',

@@ -158,7 +158,9 @@ async function request<T>(
           }
         }
 
-        throw new Error(errorMessage);
+        const apiError: any = new Error(errorMessage);
+        apiError.status = response.status;
+        throw apiError;
       }
 
       const rawText = await response.text();

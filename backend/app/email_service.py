@@ -11,9 +11,15 @@ class EmailDeliveryError(Exception):
     """Custom exception raised when email sending fails."""
     pass
 
+def get_resend_api_key() -> str:
+    key = (getattr(settings, "RESEND_API_KEY", "") or "").strip()
+    if not key or key in ("re_your_actual_key_here", "re_secret_in_production"):
+        key = (os.getenv("RESEND_API_KEY") or "").strip()
+    return key
+
 def is_resend_configured() -> bool:
     """Checks if Resend API key is configured."""
-    return bool(settings.RESEND_API_KEY and settings.RESEND_API_KEY.strip())
+    return bool(get_resend_api_key())
 
 def is_smtp_configured() -> bool:
     """Checks if real SMTP credentials have been provided."""
@@ -39,11 +45,12 @@ def _send_via_resend(to_email: str, subject: str, html_body: str, text_body: str
         "text": text_body
     }
 
+    resend_key = get_resend_api_key()
     req = urllib.request.Request(
         api_url,
         data=json.dumps(payload).encode("utf-8"),
         headers={
-            "Authorization": f"Bearer {settings.RESEND_API_KEY.strip()}",
+            "Authorization": f"Bearer {resend_key}",
             "Content-Type": "application/json",
             "User-Agent": "CustomerHub/1.0"
         }
@@ -83,8 +90,22 @@ def _send_via_resend(to_email: str, subject: str, html_body: str, text_body: str
         raise EmailDeliveryError(f"Resend delivery failed: {str(exc)}")
 
 def _send_mime_message(to_email: str, subject: str, html_body: str, text_body: str) -> None:
-    """Sends a multipart email via Gmail SMTP or fallback Resend API."""
-    # 1. Prefer SMTP if configured (delivers to ANY recipient without domain verification)
+    """Sends a multipart email via Gmail SMTP or fallback Resend API with bidirectional cloud fallback."""
+    is_render = (
+        os.getenv("RENDER", "").lower() == "true" or
+        os.getenv("ENVIRONMENT", "").lower() in ("production", "prod")
+    )
+
+    # 1. On Render cloud free tier, outbound SMTP ports (25, 465, 587) are firewalled.
+    # Prefer Resend HTTPS REST API (port 443) which delivers instantly over HTTPS.
+    if is_render and is_resend_configured():
+        try:
+            _send_via_resend(to_email, subject, html_body, text_body)
+            return
+        except Exception as resend_err:
+            print(f"⚠️ [RESEND] Primary delivery failed: {resend_err}. Attempting SMTP fallback...")
+
+    # 2. Try Gmail SMTP if configured
     if is_smtp_configured():
         from_email = settings.SMTP_FROM_EMAIL.strip() if settings.SMTP_FROM_EMAIL.strip() else settings.SMTP_USER.strip()
         from_name = settings.SMTP_FROM_NAME.strip() if settings.SMTP_FROM_NAME.strip() else "Customer Hub"
@@ -103,7 +124,6 @@ def _send_mime_message(to_email: str, subject: str, html_body: str, text_body: s
         smtp_user = settings.SMTP_USER.strip()
 
         # Dual-port resilience: try configured port, then fallback port (465 SSL or 587 STARTTLS)
-        # Cloud providers like Render frequently block port 587 egress, requiring 465 SSL
         ports_to_try = [settings.SMTP_PORT]
         alt_port = 465 if settings.SMTP_PORT != 465 else 587
         if alt_port not in ports_to_try:
@@ -113,10 +133,10 @@ def _send_mime_message(to_email: str, subject: str, html_body: str, text_body: s
         for port in ports_to_try:
             try:
                 if port == 465:
-                    server = smtplib.SMTP_SSL(smtp_host, port, timeout=12)
+                    server = smtplib.SMTP_SSL(smtp_host, port, timeout=10)
                     server.ehlo()
                 else:
-                    server = smtplib.SMTP(smtp_host, port, timeout=12)
+                    server = smtplib.SMTP(smtp_host, port, timeout=10)
                     server.ehlo()
                     if settings.SMTP_TLS:
                         server.starttls()
@@ -129,16 +149,25 @@ def _send_mime_message(to_email: str, subject: str, html_body: str, text_body: s
                 return
             except smtplib.SMTPAuthenticationError as auth_err:
                 print(f"❌ [GMAIL SMTP] Authentication Failed: {auth_err}")
-                raise EmailDeliveryError(
-                    "Gmail SMTP authentication failed. Please check your 16-character Google App Password in .env."
-                )
+                delivery_error = auth_err
+                break
             except Exception as exc:
                 print(f"⚠️ [GMAIL SMTP] Connection on port {port} failed: {exc}")
                 delivery_error = exc
 
+        # If SMTP fails on all ports, fall back to Resend HTTPS API before raising an error
+        if is_resend_configured():
+            print(f"⚠️ [SMTP] Delivery failed on ports {ports_to_try} ({delivery_error}). Attempting Resend HTTPS fallback...")
+            try:
+                _send_via_resend(to_email, subject, html_body, text_body)
+                return
+            except Exception as resend_err:
+                print(f"❌ [RESEND] Fallback also failed: {resend_err}")
+                raise EmailDeliveryError(f"Email delivery failed (SMTP: {delivery_error}; Resend: {resend_err})")
+
         raise EmailDeliveryError(f"Email delivery failed via SMTP (tried ports {ports_to_try}): {str(delivery_error)}")
 
-    # 2. Resend HTTPS API if configured
+    # 3. Resend HTTPS API if SMTP was not configured
     if is_resend_configured():
         _send_via_resend(to_email, subject, html_body, text_body)
         return

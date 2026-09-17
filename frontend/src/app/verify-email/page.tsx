@@ -103,9 +103,22 @@ function VerifyEmailContent() {
     executeVerification(code);
   };
 
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  useEffect(() => {
+    let timer: any;
+    if (resendCooldown > 0) {
+      timer = setInterval(() => {
+        setResendCooldown((prev) => Math.max(0, prev - 1));
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
+
   // Handle Resend Verification Email
   const handleResend = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (resendCooldown > 0) return;
     if (!resendEmail.trim()) {
       setResendStatusMsg({ text: 'Please enter your email address.', isError: true });
       return;
@@ -120,7 +133,14 @@ function VerifyEmailContent() {
         text: res.message || `A fresh verification link has been sent to ${resendEmail}.`,
         isError: false
       });
+      setResendCooldown(60);
     } catch (err: any) {
+      let cooldown = 60;
+      const match = (err.message || '').match(/retry after (\d+) seconds/i);
+      if (match && match[1]) {
+        cooldown = parseInt(match[1], 10);
+      }
+      setResendCooldown(cooldown);
       setResendStatusMsg({
         text: err.message || 'Unable to resend verification email. Please try again later.',
         isError: true
@@ -308,11 +328,11 @@ function VerifyEmailContent() {
               />
               <button
                 type="submit"
-                disabled={isResending}
+                disabled={isResending || resendCooldown > 0}
                 className="btn btn-primary"
                 style={{ width: '100%', padding: '0.65rem', fontSize: '0.85rem' }}
               >
-                {isResending ? 'Sending Link...' : 'Send Fresh Verification Link'}
+                {isResending ? 'Sending Link...' : resendCooldown > 0 ? `Resend Available in ${resendCooldown}s` : 'Send Fresh Verification Link'}
               </button>
             </form>
 
