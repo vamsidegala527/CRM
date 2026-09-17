@@ -2,6 +2,7 @@ import os
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base, sync_db_schema
+from app.config import settings
 from app.routers import auth, customers
 
 try:
@@ -59,6 +60,13 @@ else:
         "http://localhost",
         "http://frontend:3000",
     ]
+
+# Ensure configured FRONTEND_URL is explicitly allowed
+if getattr(settings, "FRONTEND_URL", None):
+    fe_origin = settings.FRONTEND_URL.strip().rstrip('/')
+    if fe_origin and fe_origin not in allowed_origins:
+        allowed_origins.append(fe_origin)
+
 
 app.add_middleware(
     CORSMiddleware,

@@ -99,31 +99,44 @@ def _send_mime_message(to_email: str, subject: str, html_body: str, text_body: s
         msg.attach(MIMEText(html_body, "html", "utf-8"))
 
         clean_password = settings.SMTP_PASSWORD.replace(" ", "").strip()
+        smtp_host = settings.SMTP_HOST.strip() or "smtp.gmail.com"
+        smtp_user = settings.SMTP_USER.strip()
 
-        try:
-            if settings.SMTP_PORT == 465:
-                server = smtplib.SMTP_SSL(settings.SMTP_HOST.strip(), settings.SMTP_PORT, timeout=15)
-                server.ehlo()
-            else:
-                server = smtplib.SMTP(settings.SMTP_HOST.strip(), settings.SMTP_PORT, timeout=15)
-                server.ehlo()
-                if settings.SMTP_TLS:
-                    server.starttls()
+        # Dual-port resilience: try configured port, then fallback port (465 SSL or 587 STARTTLS)
+        # Cloud providers like Render frequently block port 587 egress, requiring 465 SSL
+        ports_to_try = [settings.SMTP_PORT]
+        alt_port = 465 if settings.SMTP_PORT != 465 else 587
+        if alt_port not in ports_to_try:
+            ports_to_try.append(alt_port)
+
+        delivery_error = None
+        for port in ports_to_try:
+            try:
+                if port == 465:
+                    server = smtplib.SMTP_SSL(smtp_host, port, timeout=12)
                     server.ehlo()
+                else:
+                    server = smtplib.SMTP(smtp_host, port, timeout=12)
+                    server.ehlo()
+                    if settings.SMTP_TLS:
+                        server.starttls()
+                        server.ehlo()
 
-            server.login(settings.SMTP_USER.strip(), clean_password)
-            server.sendmail(from_email, [to_email], msg.as_string())
-            server.quit()
-            print(f"✅ [GMAIL SMTP] Email successfully delivered to {to_email}")
-            return
-        except smtplib.SMTPAuthenticationError as auth_err:
-            print(f"❌ [GMAIL SMTP] Authentication Failed: {auth_err}")
-            raise EmailDeliveryError(
-                "Gmail SMTP authentication failed. Please check your 16-character Google App Password in .env."
-            )
-        except Exception as exc:
-            print(f"❌ [GMAIL SMTP] Failed to deliver email to {to_email}: {exc}")
-            raise EmailDeliveryError(f"Email delivery failed via SMTP: {str(exc)}")
+                server.login(smtp_user, clean_password)
+                server.sendmail(from_email, [to_email], msg.as_string())
+                server.quit()
+                print(f"✅ [GMAIL SMTP] Email successfully delivered to {to_email} via port {port}")
+                return
+            except smtplib.SMTPAuthenticationError as auth_err:
+                print(f"❌ [GMAIL SMTP] Authentication Failed: {auth_err}")
+                raise EmailDeliveryError(
+                    "Gmail SMTP authentication failed. Please check your 16-character Google App Password in .env."
+                )
+            except Exception as exc:
+                print(f"⚠️ [GMAIL SMTP] Connection on port {port} failed: {exc}")
+                delivery_error = exc
+
+        raise EmailDeliveryError(f"Email delivery failed via SMTP (tried ports {ports_to_try}): {str(delivery_error)}")
 
     # 2. Resend HTTPS API if configured
     if is_resend_configured():
@@ -143,9 +156,10 @@ def _send_mime_message(to_email: str, subject: str, html_body: str, text_body: s
         "Please add your 16-character Gmail App Password to send real emails to any inbox."
     )
 
-def send_verification_email(to_email: str, user_name: str, code: str) -> None:
+def send_verification_email(to_email: str, user_name: str, code: str, frontend_url: str = None) -> None:
     """Sends an account email verification email with a prominent 6-digit code and direct 1-click link."""
-    verify_url = f"{settings.FRONTEND_URL}/verify-email?code={code}&email={to_email}"
+    base_url = (frontend_url or settings.FRONTEND_URL or "http://localhost:3000").strip().rstrip('/')
+    verify_url = f"{base_url}/verify-email?code={code}&email={to_email}"
     subject = f"{code} is your Customer Hub verification code"
 
     text_body = f"""Hello {user_name},
@@ -206,9 +220,10 @@ This code will expire in 24 hours. If you did not create an account, you can saf
 
     _send_mime_message(to_email, subject, html_body, text_body)
 
-def send_password_reset_email(to_email: str, user_name: str, token: str) -> None:
+def send_password_reset_email(to_email: str, user_name: str, token: str, frontend_url: str = None) -> None:
     """Sends a password reset email with a direct clickable reset link."""
-    reset_url = f"{settings.FRONTEND_URL}/reset-password?token={token}&email={to_email}"
+    base_url = (frontend_url or settings.FRONTEND_URL or "http://localhost:3000").strip().rstrip('/')
+    reset_url = f"{base_url}/reset-password?token={token}&email={to_email}"
     subject = "Reset Your Password - Customer Hub"
 
     text_body = f"""Hello {user_name},
@@ -260,3 +275,4 @@ This password-reset link expires in 1 hour. If you did not request a password re
 """
 
     _send_mime_message(to_email, subject, html_body, text_body)
+

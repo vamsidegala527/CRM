@@ -27,6 +27,25 @@ services:
           type: web
           name: customer-frontend
           property: url
+      - key: ALLOWED_ORIGINS
+        fromService:
+          type: web
+          name: customer-frontend
+          property: url
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: SMTP_FROM_NAME
+        value: Customer Hub
+      - key: SMTP_TLS
+        value: "true"
 
   # Frontend Next.js Web Service
   - type: web

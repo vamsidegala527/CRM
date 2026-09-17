@@ -19,10 +19,19 @@ async function handler(request: NextRequest, { params }: { params: { path: strin
     }
   });
 
+  // Ensure origin is explicitly provided so backend generates accurate email links
+  if (!headers.get('origin')) {
+    headers.set('origin', url.origin);
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
+
   const options: RequestInit = {
     method: request.method,
     headers,
     redirect: 'manual',
+    signal: controller.signal,
   };
 
   if (!['GET', 'HEAD'].includes(request.method)) {
@@ -38,6 +47,7 @@ async function handler(request: NextRequest, { params }: { params: { path: strin
 
   try {
     const backendRes = await fetch(targetUrl, options);
+    clearTimeout(timeoutId);
     const resHeaders = new Headers();
     backendRes.headers.forEach((value, key) => {
       const k = key.toLowerCase();

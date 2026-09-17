@@ -1,19 +1,20 @@
 import { Customer, CustomerInput, CustomerListResponse, AuthResponse, User } from '../types/customer';
 
 export function getApiBaseUrl(): string {
-  const envUrl = process.env.NEXT_PUBLIC_API_URL;
-  // If explicitly configured with a remote URL (not localhost or loopback), use it directly
-  if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
-    return envUrl.replace(/\/+$/, '');
-  }
   // In the browser on a deployed host (Render, Vercel, or custom domain):
+  // Return '/api/proxy' so browser requests are made to the frontend domain (same-origin),
+  // completely avoiding CORS issues and ensuring HttpOnly cookies work reliably across all browsers.
   if (typeof window !== 'undefined') {
     const hostname = window.location.hostname;
     if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
-      // Return '/api/proxy' so browser requests are made to the frontend domain
-      // and proxied directly through Next.js runtime proxy to the backend!
       return '/api/proxy';
     }
+  }
+
+  const envUrl = process.env.NEXT_PUBLIC_API_URL;
+  // If explicitly configured with a remote URL (not localhost or loopback) in server-side context
+  if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
+    return envUrl.replace(/\/+$/, '');
   }
   // Local development fallback
   return (envUrl || 'http://localhost:8000').replace(/\/+$/, '');
@@ -136,7 +137,10 @@ async function request<T>(
         
         if (response.status === 401 && typeof window !== 'undefined') {
           removeAuthToken();
-          if (!window.location.pathname.startsWith('/login')) {
+          const currentPath = window.location.pathname;
+          const isPublicAuthPage = ['/login', '/register', '/verify-email', '/reset-password', '/forgot-password']
+            .some((p) => currentPath.startsWith(p));
+          if (!isPublicAuthPage) {
             window.location.href = '/login';
           }
         }

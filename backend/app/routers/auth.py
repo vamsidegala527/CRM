@@ -46,6 +46,24 @@ def set_auth_cookie(response: Response, token: str):
         path="/"
     )
 
+def get_frontend_base_url(request: Request) -> str:
+    """
+    Dynamically extracts the frontend origin from request headers (Origin or Referer)
+    falling back to settings.FRONTEND_URL. Ensures no trailing slash.
+    This guarantees that links generated in emails always match the user's actual deployed frontend.
+    """
+    origin = request.headers.get("origin")
+    if origin and origin.startswith("http"):
+        return origin.rstrip('/')
+    referer = request.headers.get("referer")
+    if referer and referer.startswith("http"):
+        import urllib.parse
+        parsed = urllib.parse.urlparse(referer)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}".rstrip('/')
+    return settings.FRONTEND_URL.strip().rstrip('/')
+
+
 @router.post("/register", response_model=dict, status_code=status.HTTP_201_CREATED)
 def register_user(
     request: Request,
@@ -86,7 +104,8 @@ def register_user(
     db.refresh(db_user)
 
     try:
-        send_verification_email(db_user.email, db_user.full_name or "User", verification_code)
+        fe_url = get_frontend_base_url(request)
+        send_verification_email(db_user.email, db_user.full_name or "User", verification_code, frontend_url=fe_url)
     except EmailDeliveryError as email_err:
         print(f"⚠️ Verification email delivery notice: {email_err}")
 
@@ -162,7 +181,8 @@ def resend_verification(request: Request, payload: ResendVerificationRequest, db
     db.commit()
 
     try:
-        send_verification_email(user.email, user.full_name or "User", verification_code)
+        fe_url = get_frontend_base_url(request)
+        send_verification_email(user.email, user.full_name or "User", verification_code, frontend_url=fe_url)
     except EmailDeliveryError as email_err:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -202,7 +222,8 @@ def forgot_password(request: Request, payload: ForgotPasswordRequest, db: Sessio
     db.commit()
 
     try:
-        send_password_reset_email(user.email, user.full_name or "User", reset_token)
+        fe_url = get_frontend_base_url(request)
+        send_password_reset_email(user.email, user.full_name or "User", reset_token, frontend_url=fe_url)
     except EmailDeliveryError as email_err:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
