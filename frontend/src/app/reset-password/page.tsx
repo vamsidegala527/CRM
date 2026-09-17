@@ -86,6 +86,32 @@ function ResetPasswordForm() {
     }
   };
 
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'var(--bg-main, #0B0F19)',
+      }}>
+        <div style={{
+          width: '32px',
+          height: '32px',
+          border: '3px solid rgba(99, 102, 241, 0.2)',
+          borderTopColor: '#6366F1',
+          borderRadius: '50%',
+          animation: 'spin 0.8s linear infinite'
+        }} />
+      </div>
+    );
+  }
+
   return (
     <div className="glass-panel" style={{
       width: '100%',
@@ -94,6 +120,7 @@ function ResetPasswordForm() {
       borderRadius: 'var(--radius-lg)',
       boxShadow: 'var(--shadow-lg)'
     }}>
+
       {/* Header */}
       <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
         <div style={{
