@@ -57,6 +57,11 @@ export default function LoginPage() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const [gisLoaded, setGisLoaded] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const handleGoogleCallback = useCallback(async (response: any) => {
     try {
@@ -110,10 +115,10 @@ export default function LoginPage() {
   }, []);
 
   useEffect(() => {
-    if (gisLoaded && authMode !== 'forgot') {
+    if (mounted && gisLoaded && authMode !== 'forgot') {
       renderGoogleButton();
     }
-  }, [gisLoaded, authMode, renderGoogleButton]);
+  }, [mounted, gisLoaded, authMode, renderGoogleButton]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -168,14 +173,17 @@ export default function LoginPage() {
   };
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '1.5rem',
-      position: 'relative'
-    }}>
+    <div
+      suppressHydrationWarning
+      style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '1.5rem',
+        position: 'relative'
+      }}
+    >
       <Script
         src="https://accounts.google.com/gsi/client"
         strategy="afterInteractive"
@@ -488,6 +496,7 @@ export default function LoginPage() {
 
             <div
               id="googleSignInBtn"
+              suppressHydrationWarning
               style={{ display: 'flex', justifyContent: 'center', minHeight: '44px', width: '100%' }}
             />
           </div>
