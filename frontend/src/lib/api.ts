@@ -116,23 +116,32 @@ async function request<T>(
       if (!response.ok) {
         let errorMessage = `API Error: ${response.statusText}`;
         try {
-          const errData = await response.json();
-          if (errData && errData.detail) {
-            if (Array.isArray(errData.detail)) {
-              errorMessage = errData.detail
-                .map((item: any) => {
-                  const msg = item.msg || JSON.stringify(item);
-                  return msg.replace(/^Value error,\s*/i, '');
-                })
-                .join('. ');
-            } else if (typeof errData.detail === 'string') {
-              errorMessage = errData.detail;
-            } else {
-              errorMessage = JSON.stringify(errData.detail);
+          const errText = await response.text();
+          try {
+            const errData = JSON.parse(errText);
+            if (errData && errData.detail) {
+              if (Array.isArray(errData.detail)) {
+                errorMessage = errData.detail
+                  .map((item: any) => {
+                    const msg = item.msg || JSON.stringify(item);
+                    return msg.replace(/^Value error,\s*/i, '');
+                  })
+                  .join('. ');
+              } else if (typeof errData.detail === 'string') {
+                errorMessage = errData.detail;
+              } else {
+                errorMessage = JSON.stringify(errData.detail);
+              }
+            } else if (errData && errData.message) {
+              errorMessage = errData.message;
+            }
+          } catch {
+            if (errText && errText.trim().length > 0 && !errText.includes('<!DOCTYPE')) {
+              errorMessage = errText;
             }
           }
         } catch (e) {
-          // Ignore JSON parse error
+          // Ignore read error
         }
         
         if (response.status === 401 && typeof window !== 'undefined') {
@@ -148,7 +157,13 @@ async function request<T>(
         throw new Error(errorMessage);
       }
 
-      return await response.json();
+      const rawText = await response.text();
+      try {
+        return JSON.parse(rawText);
+      } catch {
+        return { message: rawText } as unknown as T;
+      }
+
     } catch (netErr: any) {
       clearTimeout(timeoutId);
       lastError = netErr;
