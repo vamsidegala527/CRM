@@ -114,7 +114,10 @@ async function request<T>(
       }
 
       if (!response.ok) {
-        let errorMessage = `API Error: ${response.statusText}`;
+        let errorMessage = `API Error (${response.status}): ${response.statusText || 'Request failed'}`;
+        if ([502, 503, 504].includes(response.status)) {
+          errorMessage = `Backend service is waking up or temporarily unreachable (${response.status}). Please wait a few moments and try again.`;
+        }
         try {
           const errText = await response.text();
           try {
@@ -136,13 +139,14 @@ async function request<T>(
               errorMessage = errData.message;
             }
           } catch {
-            if (errText && errText.trim().length > 0 && !errText.includes('<!DOCTYPE')) {
-              errorMessage = errText;
+            if (errText && errText.trim().length > 0 && !errText.includes('<!DOCTYPE') && !errText.includes('<html')) {
+              errorMessage = errText.trim();
             }
           }
         } catch (e) {
           // Ignore read error
         }
+
         
         if (response.status === 401 && typeof window !== 'undefined') {
           removeAuthToken();

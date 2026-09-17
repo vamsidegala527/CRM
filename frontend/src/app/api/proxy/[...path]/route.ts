@@ -12,9 +12,10 @@ async function handler(request: NextRequest, { params }: { params: { path: strin
   const targetUrl = `${backendBase}/${pathStr}${url.search}`;
 
   const headers = new Headers();
+  const hopByHopHeaders = ['host', 'connection', 'content-length', 'accept-encoding', 'transfer-encoding'];
   request.headers.forEach((value, key) => {
     const k = key.toLowerCase();
-    if (k !== 'host' && k !== 'connection' && k !== 'content-length') {
+    if (!hopByHopHeaders.includes(k)) {
       headers.set(key, value);
     }
   });
@@ -48,10 +49,12 @@ async function handler(request: NextRequest, { params }: { params: { path: strin
   try {
     const backendRes = await fetch(targetUrl, options);
     clearTimeout(timeoutId);
+
     const resHeaders = new Headers();
+    const strippedResponseHeaders = ['set-cookie', 'content-encoding', 'content-length', 'transfer-encoding'];
     backendRes.headers.forEach((value, key) => {
       const k = key.toLowerCase();
-      if (k !== 'set-cookie') {
+      if (!strippedResponseHeaders.includes(k)) {
         resHeaders.set(key, value);
       }
     });
@@ -76,6 +79,8 @@ async function handler(request: NextRequest, { params }: { params: { path: strin
       headers: resHeaders,
     });
   } catch (err: any) {
+    clearTimeout(timeoutId);
+    console.error(`[PROXY ERROR] Unable to reach backend at ${targetUrl}:`, err);
     return NextResponse.json(
       { detail: `Proxy unable to reach backend service at ${backendBase}: ${err.message}` },
       { status: 502 }
