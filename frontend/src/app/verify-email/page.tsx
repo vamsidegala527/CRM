@@ -42,12 +42,14 @@ function VerifyEmailContent() {
   // Update local storage user profile upon successful verification
   const syncLocalUserProfile = () => {
     try {
-      const stored = localStorage.getItem('currentUser');
+      const stored = localStorage.getItem('user_info');
       if (stored) {
         const parsed = JSON.parse(stored);
         parsed.is_verified = true;
-        localStorage.setItem('currentUser', JSON.stringify(parsed));
+        parsed.first_login = false;
+        localStorage.setItem('user_info', JSON.stringify(parsed));
       }
+      localStorage.removeItem('currentUser');
     } catch (e) {
       // Ignore storage errors
     }

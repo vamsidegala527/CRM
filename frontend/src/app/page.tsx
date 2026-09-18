@@ -1,14 +1,22 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Customer, CustomerInput, User } from '../types/customer';
-import { api, getStoredUser, setStoredUser } from '../lib/api';
+import {
+  User,
+  EmployeeCreateInput,
+  EmployeeUpdateInput,
+  EmployeeMetrics,
+  AccountStatusFilter,
+  SetupStatusFilter,
+} from '../types/employee';
+import { api, getStoredUser, setStoredUser, removeAuthToken } from '../lib/api';
 import Navbar from '../components/Navbar';
-import CustomerList from '../components/CustomerList';
-import CustomerModal from '../components/CustomerModal';
-import CustomerDetailModal from '../components/CustomerDetailModal';
-import DeleteConfirmModal from '../components/DeleteConfirmModal';
+import EmployeeList from '../components/EmployeeList';
+import EmployeeModal from '../components/EmployeeModal';
+import EmployeeDetailModal from '../components/EmployeeDetailModal';
+import EmployeeDeleteModal from '../components/EmployeeDeleteModal';
+import EmployeeSelfService from '../components/EmployeeSelfService';
 import ChatbotWidget from '../components/ChatbotWidget';
 
 export default function DashboardPage() {
@@ -24,32 +32,40 @@ export default function DashboardPage() {
   const [showVerifyInput, setShowVerifyInput] = useState(false);
   const [verifyTokenInput, setVerifyTokenInput] = useState('');
 
-  // Customer Data State
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [limit] = useState(10);
-  
-  // Search & Filter State
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('All');
-  
-  const [isLoading, setIsLoading] = useState(false);
+  // Notification state
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  // Modals state
-  const [isAddEditOpen, setIsAddEditOpen] = useState(false);
-  const [selectedCustomerForEdit, setSelectedCustomerForEdit] = useState<Customer | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  // Employee Directory Data & Filter State (Admin)
+  const [employees, setEmployees] = useState<User[]>([]);
+  const [search, setSearch] = useState('');
+  const [accountStatusFilter, setAccountStatusFilter] = useState<AccountStatusFilter>('All');
+  const [setupStatusFilter, setSetupStatusFilter] = useState<SetupStatusFilter>('All');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(15);
+  const [isEmployeeLoading, setIsEmployeeLoading] = useState(false);
 
-  const [isDetailOpen, setIsDetailOpen] = useState(false);
-  const [selectedCustomerForDetail, setSelectedCustomerForDetail] = useState<Customer | null>(null);
+  // Global KPI Metrics (Direct DB count, immune to filters/search/pagination)
+  const [employeeMetrics, setEmployeeMetrics] = useState<EmployeeMetrics>({
+    total_employees: 0,
+    active_staff: 0,
+    inactive_staff: 0,
+    setup_pending: 0,
+    setup_completed: 0,
+  });
 
-  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
-  const [selectedCustomerForDelete, setSelectedCustomerForDelete] = useState<Customer | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
+  // Modal States
+  const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
+  const [selectedEmployeeForEdit, setSelectedEmployeeForEdit] = useState<User | null>(null);
+  const [isSavingEmployee, setIsSavingEmployee] = useState(false);
+  const [sendingEmailId, setSendingEmailId] = useState<number | null>(null);
 
-  // Hydration safety & restore state from client storage
+  const [isEmployeeDetailOpen, setIsEmployeeDetailOpen] = useState(false);
+  const [selectedEmployeeForDetail, setSelectedEmployeeForDetail] = useState<User | null>(null);
+
+  const [isEmployeeDeleteOpen, setIsEmployeeDeleteOpen] = useState(false);
+  const [selectedEmployeeForDelete, setSelectedEmployeeForDelete] = useState<User | null>(null);
+
+  // Hydration safety & restore state from sessionStorage
   useEffect(() => {
     setMounted(true);
     const stored = getStoredUser();
@@ -57,11 +73,13 @@ export default function DashboardPage() {
       setCurrentUser(stored);
     }
     if (typeof window !== 'undefined') {
-      const savedSearch = sessionStorage.getItem('crm_search');
+      const savedSearch = sessionStorage.getItem('hr_search');
       if (savedSearch) setSearch(savedSearch);
-      const savedFilter = sessionStorage.getItem('crm_status_filter');
-      if (savedFilter) setStatusFilter(savedFilter);
-      const savedPage = sessionStorage.getItem('crm_page');
+      const savedAccountFilter = sessionStorage.getItem('hr_account_filter');
+      if (savedAccountFilter) setAccountStatusFilter(savedAccountFilter as AccountStatusFilter);
+      const savedSetupFilter = sessionStorage.getItem('hr_setup_filter');
+      if (savedSetupFilter) setSetupStatusFilter(savedSetupFilter as SetupStatusFilter);
+      const savedPage = sessionStorage.getItem('hr_page');
       if (savedPage) {
         const p = parseInt(savedPage, 10);
         if (!isNaN(p) && p > 0) setPage(p);
@@ -69,59 +87,24 @@ export default function DashboardPage() {
     }
   }, []);
 
-  // Save search, statusFilter, page into sessionStorage to persist across reloads
+  // Save search & filter states to sessionStorage
   useEffect(() => {
     if (typeof window !== 'undefined' && mounted) {
-      sessionStorage.setItem('crm_search', search);
+      sessionStorage.setItem('hr_search', search);
+      sessionStorage.setItem('hr_account_filter', accountStatusFilter);
+      sessionStorage.setItem('hr_setup_filter', setupStatusFilter);
+      sessionStorage.setItem('hr_page', page.toString());
     }
-  }, [search, mounted]);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined' && mounted) {
-      sessionStorage.setItem('crm_status_filter', statusFilter);
-    }
-  }, [statusFilter, mounted]);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined' && mounted) {
-      sessionStorage.setItem('crm_page', page.toString());
-    }
-  }, [page, mounted]);
-
-  // Restore active modal state if user refreshed while modal was open
-  useEffect(() => {
-    if (typeof window !== 'undefined' && mounted) {
-      try {
-        const savedModal = sessionStorage.getItem('crm_active_modal');
-        if (savedModal) {
-          const parsed = JSON.parse(savedModal);
-          if (parsed.type === 'add') {
-            setSelectedCustomerForEdit(null);
-            setIsAddEditOpen(true);
-          } else if (parsed.type === 'edit' && parsed.customer) {
-            setSelectedCustomerForEdit(parsed.customer);
-            setIsAddEditOpen(true);
-          } else if (parsed.type === 'detail' && parsed.customer) {
-            setSelectedCustomerForDetail(parsed.customer);
-            setIsDetailOpen(true);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to restore modal state', err);
-      }
-    }
-  }, [mounted]);
+  }, [search, accountStatusFilter, setupStatusFilter, page, mounted]);
 
   const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
     setNotification({ message, type });
-    setTimeout(() => {
-      setNotification(null);
-    }, 4000);
+    setTimeout(() => setNotification(null), 5000);
   };
 
-  // Cold start elapsed timer
+  // Cold Start Elapsed Timer for User Feedback
   useEffect(() => {
-    let timer: any;
+    let timer: NodeJS.Timeout;
     if (authChecking) {
       timer = setInterval(() => {
         setAuthElapsed((prev) => prev + 1);
@@ -161,13 +144,13 @@ export default function DashboardPage() {
     checkAuth();
   }, [mounted, checkAuth, router]);
 
-  // Email verification handlers
+  // Email verification handlers for Admin
   const handleResendVerification = async () => {
     if (!currentUser?.email) return;
     try {
       setIsVerifyingEmail(true);
       const res = await api.resendVerification(currentUser.email);
-      showNotification(res.message || 'Verification email sent! Please check your inbox to verify your account.');
+      showNotification(res.message || 'Verification email sent! Please check your inbox.');
     } catch (err: any) {
       showNotification(err.message || 'Failed to resend verification token', 'error');
     } finally {
@@ -183,7 +166,7 @@ export default function DashboardPage() {
       const res = await api.verifyEmail(verifyTokenInput.trim());
       showNotification(res.message || 'Email verified successfully!');
       if (currentUser) {
-        const updated = { ...currentUser, is_verified: true };
+        const updated = { ...currentUser, is_verified: true, first_login: false };
         setCurrentUser(updated);
         setStoredUser(updated);
       }
@@ -196,107 +179,194 @@ export default function DashboardPage() {
     }
   };
 
-  // Fetch Customers
-  const fetchCustomers = useCallback(async () => {
-    setIsLoading(true);
+  const handleLogout = async () => {
     try {
-      const res = await api.getCustomers({
-        search,
-        status: statusFilter,
-        page,
+      await api.logout();
+    } catch {
+      // ignore
+    }
+    removeAuthToken();
+    router.push('/login');
+  };
+
+  // Fetch Employee Metrics (independent from search, filters, and pagination)
+  const fetchEmployeeMetrics = useCallback(async () => {
+    try {
+      const m = await api.getEmployeeMetrics();
+      setEmployeeMetrics(m);
+    } catch (err: any) {
+      console.error('Failed to fetch employee metrics:', err);
+    }
+  }, []);
+
+  // Fetch Employees (Admin only)
+  const fetchEmployees = useCallback(async () => {
+    setIsEmployeeLoading(true);
+    try {
+      const emps = await api.getEmployees({
+        search: search.trim() || undefined,
+        account_status: accountStatusFilter !== 'All' ? accountStatusFilter : undefined,
+        setup_status: setupStatusFilter !== 'All' ? setupStatusFilter : undefined,
+        skip: (page - 1) * limit,
         limit,
       });
-      setCustomers(res.items);
-      setTotal(res.total);
+      setEmployees(emps);
     } catch (err: any) {
-      showNotification(err.message || 'Error fetching customers from PostgreSQL', 'error');
+      showNotification(err.message || 'Error fetching employees from backend', 'error');
     } finally {
-      setIsLoading(false);
+      setIsEmployeeLoading(false);
     }
-  }, [search, statusFilter, page, limit]);
+  }, [search, accountStatusFilter, setupStatusFilter, page, limit]);
 
+  // Computed pagination totals
+  const totalEmployeesCount = useMemo(() => {
+    if (search.trim()) {
+      return employees.length < limit && page === 1
+        ? employees.length
+        : Math.max(employees.length, employeeMetrics.total_employees);
+    }
+    if (accountStatusFilter === 'Active' && setupStatusFilter === 'Pending') {
+      return Math.min(employeeMetrics.active_staff, employeeMetrics.setup_pending);
+    }
+    if (accountStatusFilter === 'Active' && setupStatusFilter === 'Completed') {
+      return Math.min(employeeMetrics.active_staff, employeeMetrics.setup_completed);
+    }
+    if (accountStatusFilter === 'Active') return employeeMetrics.active_staff;
+    if (accountStatusFilter === 'Inactive') return employeeMetrics.inactive_staff;
+    if (setupStatusFilter === 'Pending') return employeeMetrics.setup_pending;
+    if (setupStatusFilter === 'Completed') return employeeMetrics.setup_completed;
+    return employeeMetrics.total_employees;
+  }, [accountStatusFilter, setupStatusFilter, employeeMetrics, search, employees.length, limit, page]);
+
+  const totalPages = Math.max(1, Math.ceil((totalEmployeesCount || 1) / limit));
+
+  const pageNumbers = useMemo(() => {
+    const pages: (number | string)[] = [];
+    if (totalPages <= 7) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+      pages.push(1);
+      if (page > 3) pages.push('...');
+      const start = Math.max(2, page - 1);
+      const end = Math.min(totalPages - 1, page + 1);
+      for (let i = start; i <= end; i++) pages.push(i);
+      if (page < totalPages - 2) pages.push('...');
+      pages.push(totalPages);
+    }
+    return pages;
+  }, [page, totalPages]);
+
+  // Trigger data load for Admin
   useEffect(() => {
-    if (!authChecking && currentUser) {
-      fetchCustomers();
+    if (!authChecking && currentUser && currentUser.role === 'admin') {
+      fetchEmployees();
+      fetchEmployeeMetrics();
     }
-  }, [authChecking, currentUser, fetchCustomers]);
+  }, [authChecking, currentUser, fetchEmployees, fetchEmployeeMetrics]);
 
-  // Add / Edit Handlers
-  const handleOpenAdd = () => {
-    setSelectedCustomerForEdit(null);
-    setIsAddEditOpen(true);
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem('crm_active_modal', JSON.stringify({ type: 'add' }));
-    }
+  // Reset to page 1 on filter or search change
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearch(e.target.value);
+    setPage(1);
   };
 
-  const handleOpenEdit = (customer: Customer) => {
-    setSelectedCustomerForEdit(customer);
-    setIsAddEditOpen(true);
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem('crm_active_modal', JSON.stringify({ type: 'edit', customer }));
-    }
+  const handleAccountStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setAccountStatusFilter(e.target.value as AccountStatusFilter);
+    setPage(1);
   };
 
-  const handleCloseAddEdit = () => {
-    setIsAddEditOpen(false);
-    if (typeof window !== 'undefined') {
-      sessionStorage.removeItem('crm_active_modal');
-    }
+  const handleSetupStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSetupStatusFilter(e.target.value as SetupStatusFilter);
+    setPage(1);
   };
 
-  const handleSaveCustomer = async (data: CustomerInput) => {
-    setIsSubmitting(true);
+  // Employee Modal Handlers
+  const handleOpenAddEmployee = () => {
+    setSelectedEmployeeForEdit(null);
+    setIsEmployeeModalOpen(true);
+  };
+
+  const handleOpenEditEmployee = (emp: User) => {
+    setSelectedEmployeeForEdit(emp);
+    setIsEmployeeModalOpen(true);
+  };
+
+  const handleSaveEmployee = async (data: EmployeeCreateInput | EmployeeUpdateInput) => {
+    setIsSavingEmployee(true);
     try {
-      if (selectedCustomerForEdit) {
-        await api.updateCustomer(selectedCustomerForEdit.id, data);
-        showNotification(`Customer "${data.name}" updated successfully.`);
+      if (selectedEmployeeForEdit) {
+        await api.updateEmployee(selectedEmployeeForEdit.id, data as EmployeeUpdateInput);
+        showNotification(`Employee "${data.full_name}" updated successfully.`);
       } else {
-        await api.createCustomer(data);
-        showNotification(`New customer "${data.name}" created successfully.`);
+        await api.createEmployee(data as EmployeeCreateInput);
+        showNotification(`Employee "${data.full_name}" created and onboarding invitation dispatched!`);
       }
-      handleCloseAddEdit();
-      fetchCustomers();
+      setIsEmployeeModalOpen(false);
+      fetchEmployees();
+      fetchEmployeeMetrics();
     } catch (err: any) {
       throw err;
     } finally {
-      setIsSubmitting(false);
+      setIsSavingEmployee(false);
     }
   };
 
-  const handleOpenView = (customer: Customer) => {
-    setSelectedCustomerForDetail(customer);
-    setIsDetailOpen(true);
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem('crm_active_modal', JSON.stringify({ type: 'detail', customer }));
-    }
-  };
-
-  const handleCloseDetail = () => {
-    setIsDetailOpen(false);
-    if (typeof window !== 'undefined') {
-      sessionStorage.removeItem('crm_active_modal');
-    }
-  };
-
-  const handleOpenDelete = (customer: Customer) => {
-    setSelectedCustomerForDelete(customer);
-    setIsDeleteOpen(true);
-  };
-
-  const handleConfirmDelete = async () => {
-    if (!selectedCustomerForDelete) return;
-    setIsDeleting(true);
+  const handleSendLoginEmail = async (emp: User) => {
+    setSendingEmailId(emp.id);
     try {
-      await api.deleteCustomer(selectedCustomerForDelete.id);
-      showNotification(`Customer "${selectedCustomerForDelete.name}" deleted successfully.`);
-      setIsDeleteOpen(false);
-      fetchCustomers();
+      const res = await api.sendEmployeeLoginEmail(emp.id);
+      showNotification(res.message || `Setup login email successfully sent to ${emp.email}!`);
+      fetchEmployees();
+      fetchEmployeeMetrics();
     } catch (err: any) {
-      showNotification(err.message || 'Failed to delete customer', 'error');
+      showNotification(err.message || 'Failed to send login setup email.', 'error');
     } finally {
-      setIsDeleting(false);
+      setSendingEmailId(null);
     }
+  };
+
+  const handleDeactivateEmployee = async (emp: User) => {
+    if (!confirm(`Are you sure you want to deactivate ${emp.full_name}? Their active sessions will be revoked.`)) return;
+    try {
+      const res = await api.deactivateEmployee(emp.id, false, false);
+      showNotification(res.message || `${emp.full_name} deactivated.`);
+      fetchEmployees();
+      fetchEmployeeMetrics();
+    } catch (err: any) {
+      showNotification(err.message || 'Failed to deactivate employee.', 'error');
+    }
+  };
+
+  const handleReactivateEmployee = async (emp: User) => {
+    try {
+      await api.reactivateEmployee(emp.id);
+      showNotification(`Employee "${emp.full_name}" reactivated successfully. Account is now active.`);
+      fetchEmployees();
+      fetchEmployeeMetrics();
+    } catch (err: any) {
+      showNotification(err.message || 'Failed to reactivate employee.', 'error');
+    }
+  };
+
+  const handleOpenDeleteEmployee = (emp: User) => {
+    setSelectedEmployeeForDelete(emp);
+    setIsEmployeeDeleteOpen(true);
+  };
+
+  const handleConfirmDeleteEmployee = async (emp: User, permanent: boolean, confirmed: boolean) => {
+    try {
+      const res = await api.deactivateEmployee(emp.id, permanent, confirmed);
+      showNotification(res.message || (permanent ? 'Employee permanently deleted.' : 'Employee deactivated.'));
+      fetchEmployees();
+      fetchEmployeeMetrics();
+    } catch (err: any) {
+      throw err;
+    }
+  };
+
+  const handleViewEmployee = (emp: User) => {
+    setSelectedEmployeeForDetail(emp);
+    setIsEmployeeDetailOpen(true);
   };
 
   if (!mounted) {
@@ -322,178 +392,53 @@ export default function DashboardPage() {
   }
 
   if (authChecking && !currentUser) {
-    if (authElapsed < 3) {
-      return (
+    return (
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'var(--bg-main, #0B0F19)',
+        gap: '1rem'
+      }}>
         <div style={{
-          minHeight: '100vh',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'var(--bg-main, #0B0F19)',
-          gap: '1rem'
-        }}>
-          <div style={{
-            width: '40px',
-            height: '40px',
-            border: '3px solid rgba(99, 102, 241, 0.2)',
-            borderTopColor: '#6366F1',
-            borderRadius: '50%',
-            animation: 'spin 0.8s linear infinite'
-          }} />
-          <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Securing session...</p>
-        </div>
-      );
-    }
-
-    return (
-      <div style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '1.5rem',
-        background: 'radial-gradient(ellipse at 50% 30%, rgba(99, 102, 241, 0.15), transparent 70%)'
-      }}>
-        <div className="glass-panel" style={{
-          maxWidth: '460px',
-          width: '100%',
-          padding: '2.5rem 2rem',
-          borderRadius: 'var(--radius-lg)',
-          textAlign: 'center',
-          boxShadow: 'var(--shadow-lg)',
-          border: '1px solid rgba(255, 255, 255, 0.1)'
-        }}>
-          <div style={{
-            width: '56px',
-            height: '56px',
-            borderRadius: '50%',
-            border: '3px solid rgba(99, 102, 241, 0.2)',
-            borderTopColor: '#6366F1',
-            margin: '0 auto 1.5rem',
-            animation: 'spin 1s linear infinite'
-          }} />
-          <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
-          
-          <h3 style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--text-main)', marginBottom: '0.5rem' }}>
-            Connecting to Server...
-          </h3>
-          
-          <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', lineHeight: '1.6', marginBottom: '1.25rem' }}>
-            Cloud backends may take 15–30 seconds on cold starts. We are securing your session and waking up the services.
-          </p>
-
-          <div style={{
-            display: 'inline-block',
-            padding: '0.35rem 0.85rem',
-            borderRadius: 'var(--radius-full)',
-            background: 'rgba(99, 102, 241, 0.12)',
-            color: '#818CF8',
-            fontSize: '0.8rem',
-            fontWeight: '600',
-            marginBottom: '1.5rem'
-          }}>
-            ⏱️ Elapsed: {authElapsed}s
-          </div>
-
-          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
-            <button
-              onClick={() => checkAuth()}
-              className="btn btn-primary"
-              style={{ fontSize: '0.85rem', padding: '0.55rem 1.15rem' }}
-            >
-              🔄 Retry Connection
-            </button>
-            <button
-              onClick={() => router.push('/login')}
-              className="btn btn-secondary"
-              style={{ fontSize: '0.85rem', padding: '0.55rem 1.15rem' }}
-            >
-              Go to Sign In
-            </button>
-          </div>
-        </div>
+          width: '40px',
+          height: '40px',
+          border: '3px solid rgba(99, 102, 241, 0.2)',
+          borderTopColor: '#6366F1',
+          borderRadius: '50%',
+          animation: 'spin 0.8s linear infinite'
+        }} />
+        <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Securing HR Portal session...</p>
       </div>
     );
   }
-
-  if (authError && !currentUser) {
-    return (
-      <div style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '1.5rem',
-      }}>
-        <div className="glass-panel" style={{
-          maxWidth: '460px',
-          width: '100%',
-          padding: '2.5rem 2rem',
-          borderRadius: 'var(--radius-lg)',
-          textAlign: 'center',
-          boxShadow: 'var(--shadow-lg)',
-          border: '1px solid rgba(244, 63, 94, 0.3)'
-        }}>
-          <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>⚠️</div>
-          <h3 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#F87171', marginBottom: '0.5rem' }}>
-            Backend Wake-Up / Connection Issue
-          </h3>
-          <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', lineHeight: '1.6', marginBottom: '1.5rem' }}>
-            {authError}
-          </p>
-          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
-            <button
-              onClick={() => checkAuth()}
-              className="btn btn-primary"
-              style={{ fontSize: '0.85rem', padding: '0.6rem 1.25rem' }}
-            >
-              🔄 Retry Now
-            </button>
-            <button
-              onClick={() => router.push('/login')}
-              className="btn btn-secondary"
-              style={{ fontSize: '0.85rem', padding: '0.6rem 1.25rem' }}
-            >
-              Sign In
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const activeCount = customers.filter(c => c.status === 'Active').length;
-  const leadCount = customers.filter(c => c.status === 'Lead').length;
-  const prospectCount = customers.filter(c => c.status === 'Prospect').length;
 
   return (
-    <div style={{ minHeight: '100vh', paddingBottom: '3rem' }}>
-      <Navbar
-        user={currentUser}
-        onLogout={() => api.logout()}
-      />
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-main, #0B0F19)' }}>
+      <Navbar user={currentUser} onLogout={handleLogout} />
 
-      <div className="container" style={{ marginTop: '2rem' }}>
-        {/* Unverified Email Warning Banner */}
-        {currentUser && currentUser.is_verified === false && (
+      <main style={{ flex: 1, padding: '2rem 1.5rem 8rem 1.5rem', maxWidth: '1440px', width: '100%', margin: '0 auto' }}>
+        {/* Email Verification Banner */}
+        {currentUser && !currentUser.is_verified && (
           <div style={{
-            background: 'linear-gradient(90deg, rgba(234, 179, 8, 0.15) 0%, rgba(245, 158, 11, 0.08) 100%)',
+            background: 'linear-gradient(135deg, rgba(234, 179, 8, 0.15) 0%, rgba(202, 138, 4, 0.1) 100%)',
             border: '1px solid rgba(234, 179, 8, 0.35)',
-            borderRadius: 'var(--radius-sm)',
-            padding: '0.85rem 1.25rem',
+            borderRadius: 'var(--radius-md)',
+            padding: '1rem 1.25rem',
             marginBottom: '1.5rem',
             display: 'flex',
-            flexWrap: 'wrap',
             alignItems: 'center',
             justifyContent: 'space-between',
-            gap: '0.75rem'
+            gap: '1rem',
+            flexWrap: 'wrap'
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-              <span style={{ fontSize: '1.1rem' }}>✉️</span>
-              <span style={{ fontSize: '0.875rem', color: '#FDE047' }}>
-                <strong>Email verification needed:</strong> Your account (<em>{currentUser.email}</em>) has not yet been verified.
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <span style={{ fontSize: '1.25rem' }}>⚠️</span>
+              <span style={{ fontSize: '0.9rem', color: '#FEF08A' }}>
+                Your email address <strong>{currentUser.email}</strong> is unverified.
               </span>
             </div>
 
@@ -562,7 +507,8 @@ export default function DashboardPage() {
             </div>
           </div>
         )}
-        {/* Notification Alert */}
+
+        {/* Global Notification Banner */}
         {notification && (
           <div style={{
             background: notification.type === 'success' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)',
@@ -583,132 +529,459 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Dashboard Metrics Header */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-          gap: '1.25rem',
-          marginBottom: '2rem'
-        }}>
-          <div className="glass-panel" style={{ padding: '1.25rem' }}>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Total Customers
-            </span>
-            <div style={{ fontSize: '1.75rem', fontWeight: '800', color: 'var(--text-main)', marginTop: '0.25rem' }}>
-              {total}
-            </div>
-          </div>
+        {/* ROLE VIEW ROUTING */}
+        {currentUser?.role === 'employee' ? (
+          /* ROLE 1: EMPLOYEE SELF-SERVICE */
+          <EmployeeSelfService
+            user={currentUser}
+            onUserUpdate={(u) => {
+              setCurrentUser(u);
+              setStoredUser(u);
+            }}
+            showNotification={showNotification}
+          />
+        ) : (
+          /* ROLE 2: HR/ADMIN PORTAL DASHBOARD */
+          <>
+            {/* Dashboard Header Bar */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start',
+              marginBottom: '1.75rem',
+              flexWrap: 'wrap',
+              gap: '1rem'
+            }}>
+              <div>
+                <h1 style={{
+                  fontSize: '1.75rem',
+                  fontWeight: 800,
+                  color: 'var(--text-main)',
+                  margin: 0,
+                  letterSpacing: '-0.02em',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem'
+                }}>
+                  <span>👥</span> HR & Employee Directory
+                </h1>
+                <p style={{ fontSize: '0.9rem', color: 'var(--text-subtle)', margin: '0.35rem 0 0' }}>
+                  Manage organization personnel, department rosters, onboarding statuses, and access permissions.
+                </p>
+              </div>
 
-          <div className="glass-panel" style={{ padding: '1.25rem' }}>
-            <span style={{ fontSize: '0.75rem', color: '#34D399', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Active Accounts
-            </span>
-            <div style={{ fontSize: '1.75rem', fontWeight: '800', color: 'var(--text-main)', marginTop: '0.25rem' }}>
-              {activeCount}
-            </div>
-          </div>
-
-          <div className="glass-panel" style={{ padding: '1.25rem' }}>
-            <span style={{ fontSize: '0.75rem', color: '#22D3EE', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Sales Leads
-            </span>
-            <div style={{ fontSize: '1.75rem', fontWeight: '800', color: 'var(--text-main)', marginTop: '0.25rem' }}>
-              {leadCount}
-            </div>
-          </div>
-
-          <div className="glass-panel" style={{ padding: '1.25rem' }}>
-            <span style={{ fontSize: '0.75rem', color: '#FBBF24', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Prospects
-            </span>
-            <div style={{ fontSize: '1.75rem', fontWeight: '800', color: 'var(--text-main)', marginTop: '0.25rem' }}>
-              {prospectCount}
-            </div>
-          </div>
-        </div>
-
-        {/* Action Controls Bar */}
-        <div className="glass-panel" style={{ padding: '1.25rem', marginBottom: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', flex: 1, minWidth: '280px' }}>
-            <div style={{ position: 'relative', flex: 1, minWidth: '220px' }}>
-              <input
-                type="text"
-                className="form-control"
-                placeholder="Search by customer name, email, company, or phone..."
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
-                  setPage(1);
+              <button
+                type="button"
+                onClick={handleOpenAddEmployee}
+                className="btn btn-primary"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '0.65rem 1.25rem',
+                  fontWeight: 600,
+                  fontSize: '0.92rem',
+                  boxShadow: '0 4px 14px rgba(99, 102, 241, 0.35)'
                 }}
-                style={{ paddingLeft: '2.5rem' }}
-              />
-              <span style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-subtle)' }}>
-                &#128065;
-              </span>
+              >
+                <span>➕</span> Add Employee
+              </button>
             </div>
 
-            <select
-              className="form-control"
-              value={statusFilter}
-              onChange={(e) => {
-                setStatusFilter(e.target.value);
-                setPage(1);
+            {/* 5 KPI Metric Cards (Calculated independently from search, filters, and pagination) */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+              gap: '1rem',
+              marginBottom: '1.75rem'
+            }}>
+              {/* Card 1: Total Employees */}
+              <div className="glass-panel" style={{ padding: '1.25rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+                    Total Employees
+                  </span>
+                  <span style={{ fontSize: '1.1rem' }}>👥</span>
+                </div>
+                <div style={{ fontSize: '1.85rem', fontWeight: 800, color: 'var(--text-main)', marginTop: '0.35rem' }}>
+                  {employeeMetrics.total_employees}
+                </div>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-subtle)' }}>All staff records</span>
+              </div>
+
+              {/* Card 2: Active Staff */}
+              <div className="glass-panel" style={{ padding: '1.25rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#34D399', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+                    Active Staff
+                  </span>
+                  <span style={{ fontSize: '1.1rem' }}>⚡</span>
+                </div>
+                <div style={{ fontSize: '1.85rem', fontWeight: 800, color: '#34D399', marginTop: '0.35rem' }}>
+                  {employeeMetrics.active_staff}
+                </div>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-subtle)' }}>Authorized to sign in</span>
+              </div>
+
+              {/* Card 3: Inactive Staff */}
+              <div className="glass-panel" style={{ padding: '1.25rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#F87171', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+                    Inactive Staff
+                  </span>
+                  <span style={{ fontSize: '1.1rem' }}>⏸️</span>
+                </div>
+                <div style={{ fontSize: '1.85rem', fontWeight: 800, color: '#F87171', marginTop: '0.35rem' }}>
+                  {employeeMetrics.inactive_staff}
+                </div>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-subtle)' }}>Deactivated / Suspended</span>
+              </div>
+
+              {/* Card 4: Setup Pending */}
+              <div className="glass-panel" style={{ padding: '1.25rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#FBBF24', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+                    Setup Pending
+                  </span>
+                  <span style={{ fontSize: '1.1rem' }}>⏳</span>
+                </div>
+                <div style={{ fontSize: '1.85rem', fontWeight: 800, color: '#FBBF24', marginTop: '0.35rem' }}>
+                  {employeeMetrics.setup_pending}
+                </div>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-subtle)' }}>Awaiting password setup</span>
+              </div>
+
+              {/* Card 5: Setup Completed */}
+              <div className="glass-panel" style={{ padding: '1.25rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#818CF8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+                    Setup Completed
+                  </span>
+                  <span style={{ fontSize: '1.1rem' }}>✓</span>
+                </div>
+                <div style={{ fontSize: '1.85rem', fontWeight: 800, color: '#818CF8', marginTop: '0.35rem' }}>
+                  {employeeMetrics.setup_completed}
+                </div>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-subtle)' }}>Active profile onboarded</span>
+              </div>
+            </div>
+
+            {/* Filter & Search Toolbar (Two Independent Filters) */}
+            <div className="glass-panel" style={{
+              padding: '1.1rem 1.25rem',
+              marginBottom: '1.5rem',
+              display: 'flex',
+              gap: '1rem',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              {/* Search Box */}
+              <div style={{ flex: '1 1 300px', position: 'relative' }}>
+                <span style={{
+                  position: 'absolute',
+                  left: '0.85rem',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--text-subtle)',
+                  fontSize: '0.9rem'
+                }}>
+                  🔍
+                </span>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Search by name, email, department, role, phone, company, or ID..."
+                  value={search}
+                  onChange={handleSearchChange}
+                  style={{ paddingLeft: '2.4rem' }}
+                />
+              </div>
+
+              {/* Two Independent Filter Dropdowns */}
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                {/* Filter 1: Account Status */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <label htmlFor="account-status-filter" style={{ fontSize: '0.8rem', color: 'var(--text-subtle)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                    Account:
+                  </label>
+                  <select
+                    id="account-status-filter"
+                    className="form-control"
+                    value={accountStatusFilter}
+                    onChange={handleAccountStatusChange}
+                    style={{ minWidth: '130px' }}
+                  >
+                    <option value="All">All Accounts</option>
+                    <option value="Active">Active</option>
+                    <option value="Inactive">Inactive</option>
+                  </select>
+                </div>
+
+                {/* Filter 2: Setup Status */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <label htmlFor="setup-status-filter" style={{ fontSize: '0.8rem', color: 'var(--text-subtle)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                    Setup:
+                  </label>
+                  <select
+                    id="setup-status-filter"
+                    className="form-control"
+                    value={setupStatusFilter}
+                    onChange={handleSetupStatusChange}
+                    style={{ minWidth: '140px' }}
+                  >
+                    <option value="All">All Setup</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Completed">Completed</option>
+                  </select>
+                </div>
+
+                {/* Clear Filters Button */}
+                {(search || accountStatusFilter !== 'All' || setupStatusFilter !== 'All') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearch('');
+                      setAccountStatusFilter('All');
+                      setSetupStatusFilter('All');
+                      setPage(1);
+                    }}
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.8rem', padding: '0.5rem 0.85rem' }}
+                    title="Reset all filters and search"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Employee Directory Table */}
+            <EmployeeList
+              employees={employees}
+              isLoading={isEmployeeLoading}
+              onView={handleViewEmployee}
+              onEdit={handleOpenEditEmployee}
+              onDeactivate={handleDeactivateEmployee}
+              onReactivate={handleReactivateEmployee}
+              onDelete={handleOpenDeleteEmployee}
+              onSendEmail={handleSendLoginEmail}
+              sendingEmailId={sendingEmailId}
+            />
+
+            {/* Pagination Controls */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginTop: '1.75rem',
+              padding: '1.15rem 1.5rem',
+              background: 'rgba(15, 23, 42, 0.85)',
+              backdropFilter: 'blur(12px)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: 'var(--radius-lg, 12px)',
+              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.25)',
+              flexWrap: 'wrap',
+              gap: '1.25rem',
+              fontSize: '0.875rem',
+              color: 'var(--text-subtle)'
+            }}>
+              {/* Left: Record Count and Page Size Selector */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', flexWrap: 'wrap' }}>
+                <div>
+                  {totalEmployeesCount > 0 ? (
+                    <span>
+                      Showing <strong style={{ color: '#F1F5F9' }}>{(page - 1) * limit + 1}</strong> to{' '}
+                      <strong style={{ color: '#F1F5F9' }}>{Math.min((page - 1) * limit + employees.length, totalEmployeesCount)}</strong> of{' '}
+                      <strong style={{ color: '#F1F5F9' }}>{totalEmployeesCount}</strong> employees
+                    </span>
+                  ) : (
+                    <span>Showing <strong>0</strong> employees</span>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+                  <label htmlFor="limit-select" style={{ color: 'var(--text-muted)' }}>Per page:</label>
+                  <select
+                    id="limit-select"
+                    value={limit}
+                    onChange={(e) => {
+                      setLimit(Number(e.target.value));
+                      setPage(1);
+                    }}
+                    style={{
+                      background: 'rgba(30, 41, 59, 0.85)',
+                      color: '#F1F5F9',
+                      border: '1px solid rgba(255, 255, 255, 0.15)',
+                      borderRadius: '6px',
+                      padding: '0.3rem 0.6rem',
+                      fontSize: '0.8rem',
+                      cursor: 'pointer',
+                      outline: 'none'
+                    }}
+                  >
+                    <option value={10}>10</option>
+                    <option value={15}>15</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Center / Right: Complete Page Navigation Options with Clearance from Floating Widgets */}
+              <div style={{
+                display: 'flex',
+                gap: '0.4rem',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                paddingRight: '120px' // Guarantees the controls never sit under the floating AI button
+              }}>
+                {/* First Page */}
+                <button
+                  type="button"
+                  disabled={page <= 1 || isEmployeeLoading}
+                  onClick={() => setPage(1)}
+                  title="Go to First Page"
+                  className="btn btn-secondary"
+                  style={{
+                    fontSize: '0.8rem',
+                    padding: '0.35rem 0.65rem',
+                    opacity: page <= 1 ? 0.35 : 1,
+                    cursor: page <= 1 ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  « First
+                </button>
+
+                {/* Previous Page */}
+                <button
+                  type="button"
+                  disabled={page <= 1 || isEmployeeLoading}
+                  onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                  title="Previous Page"
+                  className="btn btn-secondary"
+                  style={{
+                    fontSize: '0.8rem',
+                    padding: '0.35rem 0.75rem',
+                    opacity: page <= 1 ? 0.35 : 1,
+                    cursor: page <= 1 ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  ‹ Prev
+                </button>
+
+                {/* Page Number Buttons */}
+                {pageNumbers.map((p, idx) => {
+                  if (p === '...') {
+                    return (
+                      <span key={`ellipsis-${idx}`} style={{ padding: '0 0.35rem', color: 'var(--text-muted)' }}>
+                        ...
+                      </span>
+                    );
+                  }
+                  const isCurrent = p === page;
+                  return (
+                    <button
+                      key={`page-${p}`}
+                      type="button"
+                      disabled={isEmployeeLoading}
+                      onClick={() => setPage(Number(p))}
+                      style={{
+                        minWidth: '34px',
+                        height: '32px',
+                        borderRadius: '8px',
+                        border: isCurrent ? '1px solid #818CF8' : '1px solid rgba(255, 255, 255, 0.1)',
+                        background: isCurrent ? 'linear-gradient(135deg, #6366F1 0%, #4F46E5 100%)' : 'rgba(30, 41, 59, 0.6)',
+                        color: isCurrent ? '#FFFFFF' : 'var(--text-main, #F1F5F9)',
+                        fontWeight: isCurrent ? 700 : 500,
+                        fontSize: '0.85rem',
+                        cursor: 'pointer',
+                        boxShadow: isCurrent ? '0 0 12px rgba(99, 102, 241, 0.5)' : 'none',
+                        transition: 'all 0.2s ease',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      {p}
+                    </button>
+                  );
+                })}
+
+                {/* Next Page */}
+                <button
+                  type="button"
+                  disabled={page >= totalPages || employees.length < limit || isEmployeeLoading}
+                  onClick={() => setPage((prev) => prev + 1)}
+                  title="Next Page"
+                  className="btn btn-secondary"
+                  style={{
+                    fontSize: '0.8rem',
+                    padding: '0.35rem 0.75rem',
+                    opacity: (page >= totalPages || employees.length < limit) ? 0.35 : 1,
+                    cursor: (page >= totalPages || employees.length < limit) ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  Next ›
+                </button>
+
+                {/* Last Page */}
+                <button
+                  type="button"
+                  disabled={page >= totalPages || employees.length < limit || isEmployeeLoading}
+                  onClick={() => setPage(totalPages)}
+                  title="Go to Last Page"
+                  className="btn btn-secondary"
+                  style={{
+                    fontSize: '0.8rem',
+                    padding: '0.35rem 0.65rem',
+                    opacity: (page >= totalPages || employees.length < limit) ? 0.35 : 1,
+                    cursor: (page >= totalPages || employees.length < limit) ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  Last »
+                </button>
+              </div>
+            </div>
+
+            {/* Modals */}
+            <EmployeeModal
+              isOpen={isEmployeeModalOpen}
+              onClose={() => setIsEmployeeModalOpen(false)}
+              onSubmit={handleSaveEmployee}
+              employee={selectedEmployeeForEdit}
+              isSubmitting={isSavingEmployee}
+            />
+
+            <EmployeeDetailModal
+              isOpen={isEmployeeDetailOpen}
+              onClose={() => setIsEmployeeDetailOpen(false)}
+              employee={selectedEmployeeForDetail}
+              onEdit={(emp) => {
+                setIsEmployeeDetailOpen(false);
+                handleOpenEditEmployee(emp);
               }}
-              style={{ width: 'auto', minWidth: '150px' }}
-            >
-              <option value="All">All Statuses</option>
-              <option value="Active">Active Only</option>
-              <option value="Lead">Leads Only</option>
-              <option value="Prospect">Prospects Only</option>
-              <option value="Inactive">Inactive Only</option>
-            </select>
-          </div>
+              onSendEmail={handleSendLoginEmail}
+              isSendingEmail={sendingEmailId === selectedEmployeeForDetail?.id}
+            />
 
-          <button onClick={handleOpenAdd} className="btn btn-primary">
-            + Add New Customer
-          </button>
-        </div>
+            <EmployeeDeleteModal
+              isOpen={isEmployeeDeleteOpen}
+              onClose={() => setIsEmployeeDeleteOpen(false)}
+              employee={selectedEmployeeForDelete}
+              onConfirm={handleConfirmDeleteEmployee}
+            />
+          </>
+        )}
+      </main>
 
-        {/* Customer Data Table */}
-        <CustomerList
-          customers={customers}
-          total={total}
-          page={page}
-          limit={limit}
-          onPageChange={(p) => setPage(p)}
-          onView={handleOpenView}
-          onEdit={handleOpenEdit}
-          onDelete={handleOpenDelete}
-          isLoading={isLoading}
-        />
-      </div>
-
-      {/* Modals */}
-      <CustomerModal
-        isOpen={isAddEditOpen}
-        onClose={handleCloseAddEdit}
-        onSubmit={handleSaveCustomer}
-        customer={selectedCustomerForEdit}
-        isSubmitting={isSubmitting}
+      {/* Nexus AI Chatbot Assistant */}
+      <ChatbotWidget
+        onEmployeeChange={() => {
+          fetchEmployees();
+          fetchEmployeeMetrics();
+        }}
       />
-
-      <CustomerDetailModal
-        isOpen={isDetailOpen}
-        onClose={handleCloseDetail}
-        customer={selectedCustomerForDetail}
-        onEdit={(cust) => handleOpenEdit(cust)}
-      />
-
-      <DeleteConfirmModal
-        isOpen={isDeleteOpen}
-        onClose={() => setIsDeleteOpen(false)}
-        onConfirm={handleConfirmDelete}
-        customer={selectedCustomerForDelete}
-        isDeleting={isDeleting}
-      />
-
-      {/* Floating AI Assistant Chatbot */}
-      <ChatbotWidget onCustomerChange={fetchCustomers} />
     </div>
   );
 }

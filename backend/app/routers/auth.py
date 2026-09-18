@@ -2,7 +2,7 @@ import os
 import secrets
 from datetime import datetime, timedelta
 # pyrefly: ignore [missing-import]
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response, BackgroundTasks
 # pyrefly: ignore [missing-import]
 from sqlalchemy.orm import Session
 # pyrefly: ignore [missing-import]
@@ -13,16 +13,33 @@ from google.oauth2 import id_token
 # pyrefly: ignore [missing-import]
 from google.auth.transport import requests as google_requests
 
+import hashlib
 from app.database import get_db
 from app.models import User
 from app.schemas import (
     UserCreate, UserResponse, Token, UserLogin, GoogleAuthRequest,
-    VerifyEmailRequest, ResendVerificationRequest, ForgotPasswordRequest, ResetPasswordRequest
+    VerifyEmailRequest, ResendVerificationRequest, ForgotPasswordRequest, ResetPasswordRequest,
+    EmployeeSetupRequest, ChangePasswordRequest
 )
-from app.auth import verify_password, get_password_hash, create_access_token, get_current_user
+from typing import Optional
+from app.auth import verify_password, get_password_hash, create_access_token, get_current_user, oauth2_scheme
 from app.config import settings
 from app.rate_limiter import limiter, get_client_ip
 from app.email_service import send_verification_email, send_password_reset_email, EmailDeliveryError
+
+def safe_send_verification_email(to_email: str, user_name: str, code: str, frontend_url: str = None) -> None:
+    """Dispatches verification email safely in background without blocking response."""
+    try:
+        send_verification_email(to_email, user_name, code, frontend_url=frontend_url)
+    except Exception as exc:
+        print(f"⚠️ [BACKGROUND EMAIL] Verification email notice for {to_email}: {exc}")
+
+def safe_send_password_reset_email(to_email: str, user_name: str, token: str, frontend_url: str = None) -> None:
+    """Dispatches password reset email safely in background without blocking response."""
+    try:
+        send_password_reset_email(to_email, user_name, token, frontend_url=frontend_url)
+    except Exception as exc:
+        print(f"⚠️ [BACKGROUND EMAIL] Password reset email notice for {to_email}: {exc}")
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
@@ -69,6 +86,7 @@ def register_user(
     request: Request,
     response: Response,
     user_in: UserCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     client_ip = get_client_ip(request)
@@ -77,40 +95,50 @@ def register_user(
     email_clean = user_in.email.strip().lower()
     
     # Case-insensitive check for existing user
-    existing_user = db.query(User).filter(func.lower(User.email) == email_clean).first()
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A user account with this email address already exists."
-        )
+    existing_user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
     
     hashed_pwd = get_password_hash(user_in.password)
     # Generate secure 6-digit verification code
     verification_code = f"{secrets.randbelow(1000000):06d}"
     verification_expires = datetime.utcnow() + timedelta(hours=24)
 
-    db_user = User(
-        email=email_clean,
-        full_name=user_in.full_name,
-        hashed_password=hashed_pwd,
-        is_active=True,
-        is_verified=False,
-        verification_token=verification_code,
-        verification_token_expires=verification_expires,
-        role="user"
-    )
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A user account with this email address already exists."
+        )
+    else:
+        db_user = User(
+            email=email_clean,
+            full_name=user_in.full_name,
+            hashed_password=hashed_pwd,
+            is_active=True,
+            is_verified=False,
+            first_login=True,
+            login_count=0,
+            verification_token=verification_code,
+            verification_token_expires=verification_expires,
+            role="admin",
+            is_setup_complete=True
+        )
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
 
-    try:
-        fe_url = get_frontend_base_url(request)
-        send_verification_email(db_user.email, db_user.full_name or "User", verification_code, frontend_url=fe_url)
-    except EmailDeliveryError as email_err:
-        print(f"⚠️ Verification email delivery notice: {email_err}")
+    fe_url = get_frontend_base_url(request)
+    background_tasks.add_task(
+        safe_send_verification_email,
+        db_user.email,
+        db_user.full_name or "User",
+        verification_code,
+        fe_url
+    )
 
     return {
         "message": f"Account created successfully. Verification code sent to {db_user.email}.",
+        "id": db_user.id,
+        "email": db_user.email,
+        "full_name": db_user.full_name,
         "user": UserResponse.model_validate(db_user),
         "verification_token": verification_code if not IS_PROD else None
     }
@@ -149,6 +177,7 @@ def verify_email(request: Request, payload: VerifyEmailRequest, db: Session = De
         )
 
     user.is_verified = True
+    user.first_login = False
     user.verification_token = None
     user.verification_token_expires = None
     db.commit()
@@ -158,13 +187,18 @@ def verify_email(request: Request, payload: VerifyEmailRequest, db: Session = De
 
 
 @router.post("/resend-verification", status_code=status.HTTP_200_OK)
-def resend_verification(request: Request, payload: ResendVerificationRequest, db: Session = Depends(get_db)):
-    """Generates and resends a 6-digit email verification code to a registered user."""
+def resend_verification(
+    request: Request,
+    payload: ResendVerificationRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """Generates and resends a 6-digit email verification code to a registered user in background."""
     client_ip = get_client_ip(request)
     limiter.check_rate_limit(f"resend_verify:{client_ip}", max_requests=5, window_seconds=300, action="verification resend")
 
     email_clean = payload.email.strip().lower()
-    user = db.query(User).filter(func.lower(User.email) == email_clean).first()
+    user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
     
     if not user:
         raise HTTPException(
@@ -180,14 +214,14 @@ def resend_verification(request: Request, payload: ResendVerificationRequest, db
     user.verification_token_expires = datetime.utcnow() + timedelta(hours=24)
     db.commit()
 
-    try:
-        fe_url = get_frontend_base_url(request)
-        send_verification_email(user.email, user.full_name or "User", verification_code, frontend_url=fe_url)
-    except EmailDeliveryError as email_err:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Unable to send verification email: {str(email_err)}"
-        )
+    fe_url = get_frontend_base_url(request)
+    background_tasks.add_task(
+        safe_send_verification_email,
+        user.email,
+        user.full_name or "User",
+        verification_code,
+        fe_url
+    )
 
     return {
         "message": f"Verification email successfully sent to {user.email}.",
@@ -196,13 +230,18 @@ def resend_verification(request: Request, payload: ResendVerificationRequest, db
 
 
 @router.post("/forgot-password", status_code=status.HTTP_200_OK)
-def forgot_password(request: Request, payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
-    """Generates a secure password reset token and sends a reset email to the registered address."""
+def forgot_password(
+    request: Request,
+    payload: ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """Generates a secure password reset token and dispatches reset email in background."""
     client_ip = get_client_ip(request)
     limiter.check_rate_limit(f"forgot_pwd:{client_ip}", max_requests=5, window_seconds=300, action="password reset request")
 
     email_clean = payload.email.strip().lower()
-    user = db.query(User).filter(func.lower(User.email) == email_clean).first()
+    user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
 
     if not user:
         raise HTTPException(
@@ -221,14 +260,14 @@ def forgot_password(request: Request, payload: ForgotPasswordRequest, db: Sessio
     user.reset_password_expires = datetime.utcnow() + timedelta(hours=1)
     db.commit()
 
-    try:
-        fe_url = get_frontend_base_url(request)
-        send_password_reset_email(user.email, user.full_name or "User", reset_token, frontend_url=fe_url)
-    except EmailDeliveryError as email_err:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Unable to send password reset email: {str(email_err)}"
-        )
+    fe_url = get_frontend_base_url(request)
+    background_tasks.add_task(
+        safe_send_password_reset_email,
+        user.email,
+        user.full_name or "User",
+        reset_token,
+        fe_url
+    )
 
     return {
         "message": f"A password reset link has been sent to {user.email}. Please check your email to reset your password."
@@ -301,13 +340,39 @@ def login_for_access_token(
             detail="Inactive account. Please contact system administrator."
         )
 
+    if user.role == "employee" and not user.is_setup_complete:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your employee account setup is incomplete. Please use the setup link sent to your email to set your password before logging in."
+        )
+
     # Authentication succeeded: reset failure trackers
     limiter.record_success(f"email:{email_clean}")
     limiter.record_success(f"ip:{client_ip}")
 
+    # Track login count and first_login status
+    current_count = user.login_count if user.login_count is not None else 0
+    is_first_time = (current_count == 0)
+
+    if is_first_time:
+        user.login_count = 1
+        user.first_login = True
+    else:
+        user.login_count = current_count + 1
+        user.first_login = False
+
+    db.commit()
+    db.refresh(user)
+
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    iat_override = None
+    if user.token_revoked_at:
+        min_iat = int(user.token_revoked_at.timestamp()) + 1
+        now_iat = int(datetime.utcnow().timestamp())
+        iat_override = max(now_iat, min_iat)
+
     access_token = create_access_token(
-        data={"sub": user.email}, expires_delta=access_token_expires
+        data={"sub": user.email}, expires_delta=access_token_expires, iat_override=iat_override
     )
 
     # Set secure HttpOnly cookie on response
@@ -367,11 +432,12 @@ def google_auth(
 
     if not user:
         # Step 2: Check by email
-        user = db.query(User).filter(func.lower(User.email) == email_clean).first()
+        user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
         if user:
             # Account linking
             user.google_id = google_user_id
             user.is_verified = True
+            user.first_login = False
             db.commit()
             db.refresh(user)
         else:
@@ -382,9 +448,12 @@ def google_auth(
                 hashed_password=None,
                 google_id=google_user_id,
                 auth_provider="google",
-                role="user",
+                role="admin",
                 is_active=True,
-                is_verified=True
+                is_verified=True,
+                first_login=False,
+                login_count=1,
+                is_setup_complete=True
             )
             db.add(user)
             db.commit()
@@ -397,8 +466,14 @@ def google_auth(
         )
 
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    iat_override = None
+    if user.token_revoked_at:
+        min_iat = int(user.token_revoked_at.timestamp()) + 1
+        now_iat = int(datetime.utcnow().timestamp())
+        iat_override = max(now_iat, min_iat)
+
     access_token = create_access_token(
-        data={"sub": user.email}, expires_delta=access_token_expires
+        data={"sub": user.email}, expires_delta=access_token_expires, iat_override=iat_override
     )
 
     # Set secure HttpOnly cookie on response
@@ -415,6 +490,7 @@ def google_auth(
 def logout_user(
     request: Request,
     response: Response,
+    token: Optional[str] = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
 ):
     """
@@ -422,7 +498,7 @@ def logout_user(
     and removes the HttpOnly access_token cookie.
     """
     try:
-        user = get_current_user(request=request, token=None, db=db)
+        user = get_current_user(request=request, token=token, db=db)
         if user:
             user.token_revoked_at = datetime.utcnow()
             db.commit()
@@ -443,3 +519,97 @@ def logout_user(
 @router.get("/me", response_model=UserResponse)
 def read_current_user(current_user: User = Depends(get_current_user)):
     return current_user
+
+
+@router.post("/setup-employee", status_code=status.HTTP_200_OK)
+def setup_employee_account(
+    request: Request,
+    payload: EmployeeSetupRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Public employee onboarding endpoint:
+    - Finds the employee by cryptographically hashing the single-use token and comparing against setup_token_hash.
+    - Validates link expiration and email match.
+    - Sets password, sets is_setup_complete=True, and invalidates the token.
+    """
+    client_ip = get_client_ip(request)
+    limiter.check_rate_limit(f"setup_ip:{client_ip}", max_requests=10, window_seconds=300, action="employee setup attempt")
+
+    token_raw = payload.token.strip()
+    token_hash = hashlib.sha256(token_raw.encode("utf-8")).hexdigest()
+
+    user = db.query(User).filter(User.setup_token_hash == token_hash).first()
+
+    if not user:
+        # Check by email for diagnostic logging and precise user feedback
+        user_by_email = db.query(User).filter(func.lower(func.trim(User.email)) == payload.email.strip().lower()).first()
+        if user_by_email:
+            print(f"⚠️ [SETUP REJECTED] Email: {payload.email} | User ID: {user_by_email.id} | Setup complete: {user_by_email.is_setup_complete} | Active: {user_by_email.is_active} | DB Token Hash: {user_by_email.setup_token_hash[:10] if user_by_email.setup_token_hash else 'None'} | Submitted Token Hash: {token_hash[:10]}")
+            if user_by_email.is_setup_complete:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="This employee account is already set up! You can log in directly with your email and password."
+                )
+            if not user_by_email.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="This employee account is currently deactivated. Please contact your HR administrator."
+                )
+        else:
+            print(f"⚠️ [SETUP REJECTED] No employee account found with email {payload.email} or token hash {token_hash[:10]}")
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or unrecognized setup link. If you received multiple emails, please use the latest link, or ask your administrator to send a new setup email."
+        )
+
+    if user.setup_token_expires and user.setup_token_expires < datetime.utcnow():
+        print(f"⚠️ [SETUP REJECTED] Setup link for {user.email} expired at {user.setup_token_expires}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This employee setup link has expired. Please contact your administrator to request a new invitation email."
+        )
+
+    if user.email.strip().lower() != payload.email.strip().lower():
+        print(f"⚠️ [SETUP REJECTED] Email mismatch: token owner is {user.email}, but submitted email is {payload.email}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email address does not match the employee account invitation."
+        )
+
+    user.hashed_password = get_password_hash(payload.new_password)
+    user.is_setup_complete = True
+    user.is_verified = True
+    user.first_login = False
+    user.setup_token_hash = None
+    user.setup_token_expires = None
+    user.token_revoked_at = datetime.utcnow()
+    db.commit()
+
+    print(f"✅ [SETUP COMPLETE] Employee account {user.email} (ID: {user.id}) successfully activated.")
+    return {"message": "Account setup successfully completed! You can now log in with your credentials."}
+
+
+@router.post("/change-password", status_code=status.HTTP_200_OK)
+def change_password(
+    payload: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Allows an authenticated user or employee to change their own password.
+    Validates the current password and revokes any active sessions across devices.
+    """
+    if not verify_password(payload.current_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect."
+        )
+
+    current_user.hashed_password = get_password_hash(payload.new_password)
+    current_user.token_revoked_at = datetime.utcnow()
+    db.commit()
+
+    return {"message": "Password changed successfully. Please log in again with your new password."}
+

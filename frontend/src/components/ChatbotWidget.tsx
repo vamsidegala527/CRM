@@ -5,43 +5,43 @@ import { useChat } from '@ai-sdk/react';
 import { getAuthToken } from '../lib/api';
 
 interface ChatbotWidgetProps {
-  onCustomerChange?: () => void;
+  onEmployeeChange?: () => void;
 }
 
 // Initial quick action prompts for empty state
 const STARTER_CATEGORIES = [
   {
-    category: 'View & Search',
+    category: 'Directory & Search',
     items: [
-      { icon: '📋', label: 'Show all my customers', prompt: 'Show all my customers' },
-      { icon: '⚡', label: 'Show Active customers only', prompt: 'Show only my Active customers' },
-      { icon: '🔍', label: 'Find customer by company/name', prompt: 'Search for customer Acme' },
+      { icon: '👥', label: 'Show all employees', prompt: 'Show all employees in the directory' },
+      { icon: '⚡', label: 'Show Active staff only', prompt: 'Show only active employees' },
+      { icon: '⏳', label: 'Show Setup Pending staff', prompt: 'Show employees who have setup pending' },
     ],
   },
   {
-    category: 'Manage & Add',
+    category: 'HR Management & Onboarding',
     items: [
-      { icon: '➕', label: 'Add a new customer', prompt: 'I want to add a new customer' },
-      { icon: '✏️', label: 'Update customer details', prompt: 'How do I update an existing customer?' },
-      { icon: '🗑️', label: 'Safely delete a record', prompt: 'How do I delete a customer?' },
+      { icon: '➕', label: 'Add a new employee', prompt: 'I want to add a new employee' },
+      { icon: '✏️', label: 'Update employee profile', prompt: 'How do I update an employee profile?' },
+      { icon: '⏸️', label: 'Deactivate an employee', prompt: 'How do I deactivate an employee account?' },
     ],
   },
   {
-    category: 'Insights & Analytics',
+    category: 'Organizational Insights',
     items: [
-      { icon: '📊', label: 'Customer status overview', prompt: 'Give me a summary breakdown of my customers by status' },
-      { icon: '🎯', label: 'How many Leads do I have?', prompt: 'How many customer Leads do I currently have?' },
+      { icon: '📊', label: 'Employee metrics overview', prompt: 'Give me a summary of total employees, active staff, and setup status' },
+      { icon: '🎯', label: 'Staff breakdown by department', prompt: 'Break down our employees by department' },
     ],
   },
 ];
 
 // Quick action chips bar above input
 const QUICK_BAR_PROMPTS = [
-  { icon: '📋', label: 'List All', prompt: 'Show all my customers' },
-  { icon: '➕', label: 'New Customer', prompt: 'I want to add a new customer' },
-  { icon: '⚡', label: 'Active', prompt: 'Show active customers' },
-  { icon: '🎯', label: 'Leads', prompt: 'Show leads' },
-  { icon: '📊', label: 'Stats', prompt: 'Give me a breakdown of all customers by status' },
+  { icon: '👥', label: 'Directory', prompt: 'Show all employees' },
+  { icon: '➕', label: 'Add Employee', prompt: 'I want to add a new employee' },
+  { icon: '⚡', label: 'Active', prompt: 'Show active employees' },
+  { icon: '⏳', label: 'Pending', prompt: 'Show employees with setup pending' },
+  { icon: '📊', label: 'HR Metrics', prompt: 'Give me a summary of all employee metrics' },
 ];
 
 /**
@@ -74,55 +74,55 @@ function extractSuggestions(rawText: string): { cleanText: string; suggestions: 
 }
 
 /**
- * Extracts ONLY customer details (omitting conversational explanations,
+ * Extracts ONLY employee details (omitting conversational explanations,
  * greetings, and confirmation text) from assistant response text or tool execution results.
  */
-function extractCustomerDetails(cleanText: string, toolInvocations?: any[]): string {
-  // 1. If tool invocation has structured customer data
+function extractEmployeeDetails(cleanText: string, toolInvocations?: any[]): string {
+  // 1. If tool invocation has structured employee data
   if (Array.isArray(toolInvocations)) {
     for (const inv of toolInvocations) {
       if (inv && inv.result) {
-        // Multiple items from getCustomers
+        // Multiple items from getEmployees
         if (Array.isArray(inv.result.items) && inv.result.items.length > 0) {
           if (inv.result.items.length === 1) {
-            const c = inv.result.items[0];
+            const e = inv.result.items[0];
             const lines: string[] = [];
-            if (c.id) lines.push(`ID: ${c.id}`);
-            if (c.name) lines.push(`Name: ${c.name}`);
-            if (c.email) lines.push(`Email: ${c.email}`);
-            if (c.company && c.company !== '-') lines.push(`Company: ${c.company}`);
-            if (c.phone && c.phone !== '-') lines.push(`Phone: ${c.phone}`);
-            if (c.status) lines.push(`Status: ${c.status}`);
-            if (c.address && c.address !== '-') lines.push(`Address: ${c.address}`);
-            if (c.notes && c.notes !== '-') lines.push(`Notes: ${c.notes}`);
+            if (e.id) lines.push(`ID: ${e.id}`);
+            if (e.full_name) lines.push(`Name: ${e.full_name}`);
+            if (e.email) lines.push(`Email: ${e.email}`);
+            if (e.department && e.department !== '-') lines.push(`Department: ${e.department}`);
+            if (e.job_title && e.job_title !== '-') lines.push(`Job Title: ${e.job_title}`);
+            if (e.company && e.company !== '-') lines.push(`Company: ${e.company}`);
+            if (e.phone && e.phone !== '-') lines.push(`Phone: ${e.phone}`);
+            lines.push(`Status: ${e.is_active ? 'Active' : 'Inactive'} | ${e.is_setup_complete ? 'Setup Complete' : 'Setup Pending'}`);
             return lines.join('\n');
           }
           return inv.result.items
-            .map((c: any, i: number) => {
+            .map((e: any, i: number) => {
               const parts: string[] = [];
-              if (c.id) parts.push(`ID: ${c.id}`);
-              if (c.name) parts.push(`Name: ${c.name}`);
-              if (c.email) parts.push(`Email: ${c.email}`);
-              if (c.company && c.company !== '-') parts.push(`Company: ${c.company}`);
-              if (c.phone && c.phone !== '-') parts.push(`Phone: ${c.phone}`);
-              if (c.status) parts.push(`Status: ${c.status}`);
+              if (e.id) parts.push(`ID: ${e.id}`);
+              if (e.full_name) parts.push(`Name: ${e.full_name}`);
+              if (e.email) parts.push(`Email: ${e.email}`);
+              if (e.department && e.department !== '-') parts.push(`Dept: ${e.department}`);
+              if (e.job_title && e.job_title !== '-') parts.push(`Title: ${e.job_title}`);
+              parts.push(e.is_active ? 'Active' : 'Inactive');
               return `${i + 1}. ` + parts.join(' | ');
             })
             .join('\n');
         }
 
-        // Single customer from createCustomer, updateCustomer, getCustomer
-        const c = inv.result.customer || (inv.result.name && inv.result.email ? inv.result : null);
-        if (c && c.name) {
+        // Single employee from createEmployee, updateEmployee, getEmployee, reactivateEmployee
+        const emp = inv.result.employee || (inv.result.full_name && inv.result.email ? inv.result : null);
+        if (emp && emp.full_name) {
           const lines: string[] = [];
-          if (c.id) lines.push(`ID: ${c.id}`);
-          lines.push(`Name: ${c.name}`);
-          if (c.email) lines.push(`Email: ${c.email}`);
-          if (c.company && c.company !== '-') lines.push(`Company: ${c.company}`);
-          if (c.phone && c.phone !== '-') lines.push(`Phone: ${c.phone}`);
-          if (c.status) lines.push(`Status: ${c.status}`);
-          if (c.address && c.address !== '-') lines.push(`Address: ${c.address}`);
-          if (c.notes && c.notes !== '-') lines.push(`Notes: ${c.notes}`);
+          if (emp.id) lines.push(`ID: ${emp.id}`);
+          lines.push(`Name: ${emp.full_name}`);
+          if (emp.email) lines.push(`Email: ${emp.email}`);
+          if (emp.department && emp.department !== '-') lines.push(`Department: ${emp.department}`);
+          if (emp.job_title && emp.job_title !== '-') lines.push(`Job Title: ${emp.job_title}`);
+          if (emp.company && emp.company !== '-') lines.push(`Company: ${emp.company}`);
+          if (emp.phone && emp.phone !== '-') lines.push(`Phone: ${emp.phone}`);
+          lines.push(`Status: ${emp.is_active ? 'Active' : 'Inactive'} | ${emp.is_setup_complete ? 'Setup Complete' : 'Setup Pending'}`);
           return lines.join('\n');
         }
       }
@@ -132,7 +132,7 @@ function extractCustomerDetails(cleanText: string, toolInvocations?: any[]): str
   // 2. Parse text content
   const lines = (cleanText || '').split('\n').map((l) => l.trim());
 
-  // Check for markdown table (like in user screenshot)
+  // Check for markdown table
   const tableLines = lines.filter((l) => l.startsWith('|') && l.endsWith('|'));
   if (tableLines.length >= 2) {
     const headerRow = tableLines[0]
@@ -141,7 +141,7 @@ function extractCustomerDetails(cleanText: string, toolInvocations?: any[]): str
       .filter(Boolean);
     const dataRows = tableLines
       .slice(1)
-      .filter((l) => !/^\|[\s\-:|]+\|$/.test(l)) // remove separator |---|---|
+      .filter((l) => !/^\|[\s\-:|]+\|$/.test(l))
       .map((row) =>
         row
           .split('|')
@@ -151,15 +151,15 @@ function extractCustomerDetails(cleanText: string, toolInvocations?: any[]): str
 
     if (dataRows.length === 1 && headerRow.length > 0) {
       const row = dataRows[0];
-      const customerInfo: string[] = [];
+      const empInfo: string[] = [];
       headerRow.forEach((header, idx) => {
         const val = row[idx];
         if (val && val !== '-' && val !== 'None' && val !== 'null') {
-          customerInfo.push(`${header}: ${val}`);
+          empInfo.push(`${header}: ${val}`);
         }
       });
-      if (customerInfo.length > 0) {
-        return customerInfo.join('\n');
+      if (empInfo.length > 0) {
+        return empInfo.join('\n');
       }
     } else if (dataRows.length > 1 && headerRow.length > 0) {
       return dataRows
@@ -180,8 +180,8 @@ function extractCustomerDetails(cleanText: string, toolInvocations?: any[]): str
     return nonSeparator.join('\n');
   }
 
-  // Check for bullet points with customer attributes
-  const fieldRegex = /^(?:[-*•]\s*)?(?:\*\*)?(name|email|phone|company|status|address|notes|customer\s*id|id)(?:\*\*)?\s*:\s*(.+)$/i;
+  // Check for bullet points with employee attributes
+  const fieldRegex = /^(?:[-*•]\s*)?(?:\*\*)?(name|full[\s_]name|email|phone|department|job[\s_]title|company|status|address|notes|employee\s*id|id)(?:\*\*)?\s*:\s*(.+)$/i;
   const matchedFields: string[] = [];
   for (const line of lines) {
     const m = line.match(fieldRegex);
@@ -378,32 +378,26 @@ function FormattedMessageBody({ content }: { content: string }) {
 }
 
 /**
- * Rich Interactive Card for Created/Updated/Retrieved Customer Records.
+ * Rich Interactive Card for Created/Updated/Retrieved Employee Records.
  */
-function CustomerResultCard({
-  customer,
+function EmployeeResultCard({
+  employee,
   actionType,
   onAction,
 }: {
-  customer: any;
-  actionType: 'created' | 'updated' | 'viewed';
+  employee: any;
+  actionType: 'created' | 'updated' | 'viewed' | 'reactivated';
   onAction: (prompt: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
 
-  if (!customer || (!customer.id && !customer.name)) return null;
+  if (!employee || (!employee.id && !employee.full_name && !employee.email)) return null;
 
-  const statusColors: Record<string, { bg: string; text: string; border: string }> = {
-    Active: { bg: 'rgba(16, 185, 129, 0.15)', text: '#34D399', border: 'rgba(16, 185, 129, 0.35)' },
-    Lead: { bg: 'rgba(59, 130, 246, 0.15)', text: '#60A5FA', border: 'rgba(59, 130, 246, 0.35)' },
-    Prospect: { bg: 'rgba(168, 85, 247, 0.15)', text: '#C084FC', border: 'rgba(168, 85, 247, 0.35)' },
-    Inactive: { bg: 'rgba(156, 163, 175, 0.15)', text: '#9CA3AF', border: 'rgba(156, 163, 175, 0.35)' },
-  };
+  const isActive = employee.is_active !== false;
+  const isSetupComplete = Boolean(employee.is_setup_complete);
+  const name = employee.full_name || employee.name || 'Employee';
 
-  const status = customer.status || 'Active';
-  const colors = statusColors[status] || statusColors.Active;
-
-  const initials = (customer.name || 'C')
+  const initials = name
     .split(' ')
     .map((w: string) => w[0])
     .slice(0, 2)
@@ -412,8 +406,8 @@ function CustomerResultCard({
 
   const handleCopyEmail = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (customer.email) {
-      navigator.clipboard.writeText(customer.email);
+    if (employee.email) {
+      navigator.clipboard.writeText(employee.email);
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
     }
@@ -436,23 +430,38 @@ function CustomerResultCard({
       {/* Header Banner */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '0.5rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-          <span style={{ fontSize: '0.85rem' }}>
-            {actionType === 'created' ? '✅ Customer Created' : actionType === 'updated' ? '🔄 Customer Updated' : '👤 Customer Details'}
+          <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>
+            {actionType === 'created' ? '✨ Employee Added' : actionType === 'updated' ? '🔄 Profile Updated' : actionType === 'reactivated' ? '⚡ Account Reactivated' : '👤 Employee Profile'}
           </span>
         </div>
-        <span
-          style={{
-            background: colors.bg,
-            color: colors.text,
-            border: `1px solid ${colors.border}`,
-            padding: '2px 8px',
-            borderRadius: '999px',
-            fontSize: '0.725rem',
-            fontWeight: 700,
-          }}
-        >
-          {status}
-        </span>
+        <div style={{ display: 'flex', gap: '0.35rem' }}>
+          <span
+            style={{
+              background: isActive ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+              color: isActive ? '#34D399' : '#FCA5A5',
+              border: `1px solid ${isActive ? 'rgba(16, 185, 129, 0.35)' : 'rgba(239, 68, 68, 0.35)'}`,
+              padding: '2px 8px',
+              borderRadius: '999px',
+              fontSize: '0.725rem',
+              fontWeight: 700,
+            }}
+          >
+            {isActive ? 'Active' : 'Inactive'}
+          </span>
+          <span
+            style={{
+              background: isSetupComplete ? 'rgba(99, 102, 241, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+              color: isSetupComplete ? '#A5B4FC' : '#FCD34D',
+              border: `1px solid ${isSetupComplete ? 'rgba(99, 102, 241, 0.35)' : 'rgba(245, 158, 11, 0.35)'}`,
+              padding: '2px 8px',
+              borderRadius: '999px',
+              fontSize: '0.725rem',
+              fontWeight: 700,
+            }}
+          >
+            {isSetupComplete ? 'Setup Complete' : 'Setup Pending'}
+          </span>
+        </div>
       </div>
 
       {/* Main Info */}
@@ -461,111 +470,121 @@ function CustomerResultCard({
           style={{
             width: '38px',
             height: '38px',
-            borderRadius: '12px',
-            background: 'linear-gradient(135deg, #6366F1 0%, #06B6D4 100%)',
+            borderRadius: '10px',
+            background: 'linear-gradient(135deg, #6366F1 0%, #4F46E5 100%)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: '0.9rem',
             fontWeight: 800,
+            fontSize: '0.95rem',
             color: '#FFFFFF',
             flexShrink: 0,
-            boxShadow: '0 4px 12px rgba(99, 102, 241, 0.3)',
+            boxShadow: '0 2px 8px rgba(99, 102, 241, 0.4)',
           }}
         >
           {initials}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-            <span style={{ fontWeight: 700, fontSize: '0.925rem', color: '#F8FAFC', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {customer.name}
+            <span style={{ fontWeight: 700, fontSize: '0.925rem', color: '#FFFFFF', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {name}
             </span>
-            {customer.id && (
-              <span style={{ fontSize: '0.7rem', color: '#818CF8', background: 'rgba(99, 102, 241, 0.15)', padding: '1px 6px', borderRadius: '4px' }}>
-                #{customer.id}
+            {employee.id && (
+              <span style={{ fontSize: '0.725rem', color: '#64748B', fontFamily: 'monospace' }}>
+                #{employee.id}
               </span>
             )}
           </div>
-          <div style={{ fontSize: '0.775rem', color: '#94A3B8', display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '2px' }}>
-            <span>✉️ {customer.email || 'No email'}</span>
-            {customer.email && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.785rem', color: '#94A3B8', marginTop: '2px' }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              ✉️ {employee.email || 'No email'}
+            </span>
+            {employee.email && (
               <button
                 type="button"
                 onClick={handleCopyEmail}
-                title="Copy email address"
+                title="Copy Email"
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: copied ? '#34D399' : '#818CF8',
                   cursor: 'pointer',
-                  fontSize: '0.7rem',
-                  padding: '1px 4px',
-                  borderRadius: '4px',
-                  fontWeight: 600,
+                  padding: '1px 3px',
+                  color: copied ? '#34D399' : '#818CF8',
+                  fontSize: '0.725rem',
                 }}
               >
-                {copied ? '✓ Copied' : 'Copy'}
+                {copied ? '✓' : '📋'}
               </button>
             )}
           </div>
-          {customer.company && (
-            <div style={{ fontSize: '0.75rem', color: '#CBD5E1', marginTop: '1px' }}>
-              🏢 {customer.company}
-            </div>
-          )}
         </div>
       </div>
 
-      {/* Quick Action Footer */}
-      <div style={{ display: 'flex', gap: '0.4rem', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '0.5rem' }}>
+      {/* Extra details row */}
+      {(employee.department || employee.job_title || employee.phone) && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', fontSize: '0.75rem', color: '#CBD5E1', background: 'rgba(0, 0, 0, 0.2)', padding: '0.35rem 0.6rem', borderRadius: '8px' }}>
+          {employee.department && (
+            <span>🏷️ <strong>Dept:</strong> {employee.department}</span>
+          )}
+          {employee.job_title && (
+            <span>💼 <strong>Title:</strong> {employee.job_title}</span>
+          )}
+          {employee.phone && (
+            <span>📞 {employee.phone}</span>
+          )}
+        </div>
+      )}
+
+      {/* Quick Action Chips */}
+      <div style={{ display: 'flex', gap: '0.45rem', marginTop: '0.15rem' }}>
         <button
           type="button"
-          onClick={() => onAction(`Show full details for customer #${customer.id}`)}
+          onClick={() => onAction(`Show full profile for employee #${employee.id || name}`)}
           style={{
             flex: 1,
-            background: 'rgba(255, 255, 255, 0.05)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+            padding: '0.4rem 0.5rem',
+            background: 'rgba(99, 102, 241, 0.15)',
+            border: '1px solid rgba(99, 102, 241, 0.35)',
             borderRadius: '8px',
-            padding: '0.35rem 0.6rem',
-            color: '#E2E8F0',
+            color: '#A5B4FC',
             fontSize: '0.75rem',
             fontWeight: 600,
             cursor: 'pointer',
             transition: 'all 0.15s ease',
           }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(99, 102, 241, 0.2)')}
-          onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)')}
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(99, 102, 241, 0.28)')}
+          onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(99, 102, 241, 0.15)')}
         >
-          👁️ Details
+          👁️ Profile
         </button>
         <button
           type="button"
-          onClick={() => onAction(`Update customer #${customer.id} with new details:`)}
+          onClick={() => onAction(`Update employee #${employee.id || name} with department: `)}
           style={{
             flex: 1,
+            padding: '0.4rem 0.5rem',
             background: 'rgba(255, 255, 255, 0.05)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
             borderRadius: '8px',
-            padding: '0.35rem 0.6rem',
             color: '#E2E8F0',
             fontSize: '0.75rem',
             fontWeight: 600,
             cursor: 'pointer',
             transition: 'all 0.15s ease',
           }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(99, 102, 241, 0.2)')}
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)')}
           onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)')}
         >
           ✏️ Edit
         </button>
         <button
           type="button"
-          onClick={() => onAction(`Delete customer #${customer.id}`)}
+          onClick={() => onAction(`Deactivate employee #${employee.id || name}`)}
           style={{
+            padding: '0.4rem 0.65rem',
             background: 'rgba(239, 68, 68, 0.12)',
             border: '1px solid rgba(239, 68, 68, 0.3)',
             borderRadius: '8px',
-            padding: '0.35rem 0.6rem',
             color: '#FCA5A5',
             fontSize: '0.75rem',
             fontWeight: 600,
@@ -575,18 +594,18 @@ function CustomerResultCard({
           onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(239, 68, 68, 0.25)')}
           onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(239, 68, 68, 0.12)')}
         >
-          🗑️
+          ⏸️
         </button>
       </div>
     </div>
   );
 }
 
-export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) {
+export default function ChatbotWidget({ onEmployeeChange }: ChatbotWidgetProps) {
   const [isOpen, setIsIsOpen] = useState(() => {
     if (typeof window !== 'undefined') {
       try {
-        const state = JSON.parse(localStorage.getItem('crm_chat_widget_state') || '{}');
+        const state = JSON.parse(localStorage.getItem('hr_chat_widget_state') || localStorage.getItem('crm_chat_widget_state') || '{}');
         if (typeof state.isOpen === 'boolean') return state.isOpen;
       } catch (e) {}
     }
@@ -664,8 +683,8 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
       return fetch(url, { ...init, headers, credentials: 'same-origin' });
     },
     onFinish: () => {
-      if (onCustomerChange) {
-        onCustomerChange();
+      if (onEmployeeChange) {
+        onEmployeeChange();
       }
     },
   } as any);
@@ -773,23 +792,23 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
     }
   };
 
-  const handleConfirmDelete = (customerId: number, customerName: string) => {
+  const handleConfirmDelete = (employeeId: any, employeeName: string) => {
     append({
       role: 'user',
-      content: `Yes, confirm deletion of customer "${customerName}" (ID #${customerId}). Delete permanently.`,
+      content: `Yes, confirm permanent deletion of employee "${employeeName}" (ID #${employeeId}). Delete permanently.`,
     });
   };
 
-  const handleCancelDelete = (customerName: string) => {
+  const handleCancelDelete = (employeeName: string) => {
     append({
       role: 'user',
-      content: `Cancel deletion of customer "${customerName}".`,
+      content: `Cancel deletion of employee "${employeeName}".`,
     });
   };
 
   const handleCopyMessage = (msgId: string, text: string, toolInvocations?: any[]) => {
-    const customerDetails = extractCustomerDetails(text, toolInvocations);
-    navigator.clipboard.writeText(customerDetails);
+    const employeeDetails = extractEmployeeDetails(text, toolInvocations);
+    navigator.clipboard.writeText(employeeDetails);
     setCopiedMessageId(msgId);
     setTimeout(() => setCopiedMessageId(null), 2000);
   };
@@ -836,7 +855,7 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
             setIsIsOpen(true);
             setIsMinimized(false);
           }}
-          aria-label="Open AI Customer Assistant"
+          aria-label="Open HR AI Assistant"
           style={{
             position: 'fixed',
             bottom: '24px',
@@ -932,21 +951,9 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
                 ✨
               </div>
               <div>
-                <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#F8FAFC', margin: 0, letterSpacing: '-0.01em' }}>
-                  Customer Assistant
+                <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#F8FAFC', margin: 0, letterSpacing: '-0.01em' }}>
+                  Nexus AI
                 </h3>
-                <div style={{ fontSize: '0.7rem', color: '#34D399', display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '1px' }}>
-                  <span
-                    style={{
-                      width: '6px',
-                      height: '6px',
-                      borderRadius: '50%',
-                      background: '#34D399',
-                      boxShadow: '0 0 6px #34D399',
-                    }}
-                  />
-                  <span>Online • High Speed Groq AI</span>
-                </div>
               </div>
             </div>
 
@@ -1090,7 +1097,7 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
                       How can I help you today?
                     </h4>
                     <p style={{ fontSize: '0.825rem', color: '#94A3B8', margin: '0 auto 1.4rem', maxWidth: '360px', lineHeight: 1.5 }}>
-                      Manage your customer database naturally with AI. Ask questions, create contacts, search, update statuses, or get instant insights.
+                      Manage your workforce directory naturally with AI. Ask questions, view staff, search departments, or get instant HR insights.
                     </p>
 
                     {/* Categorized Starters */}
@@ -1210,7 +1217,7 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
                           {isUser ? '👤' : '✨'}
                         </div>
                         <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#94A3B8' }}>
-                          {isUser ? 'You' : 'Customer Assistant'}
+                          {isUser ? 'You' : 'HR Assistant'}
                         </span>
                         <span style={{ fontSize: '0.65rem', color: '#64748B' }}>
                           {formatTime(m.createdAt)}
@@ -1244,9 +1251,10 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
                           const hasResult = 'result' in toolInvocation;
                           const result = toolInvocation.result;
 
-                          // Delete Confirmation Card
-                          if (toolName === 'deleteCustomer' && hasResult && result?.requiresConfirmation) {
-                            const { customerId, customerName } = result;
+                          // Permanent Deletion Confirmation Card
+                          if (toolName === 'deleteEmployee' && hasResult && result?.requiresConfirmation) {
+                            const employeeId = result.employeeId || result.id;
+                            const employeeName = result.employeeName || result.name || 'Employee';
                             return (
                               <div
                                 key={toolCallId}
@@ -1267,12 +1275,12 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
                                   <span>Permanent Deletion Confirmation</span>
                                 </div>
                                 <div style={{ fontSize: '0.825rem', color: '#E2E8F0', lineHeight: 1.45 }}>
-                                  Are you sure you want to permanently delete customer <strong>{customerName}</strong> (ID #{customerId})? This action cannot be undone.
+                                  Are you sure you want to permanently delete employee <strong>{employeeName}</strong> (ID #{employeeId})? This action cannot be undone.
                                 </div>
                                 <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
                                   <button
                                     className="chatbot-confirm-delete-btn"
-                                    onClick={() => handleConfirmDelete(customerId, customerName)}
+                                    onClick={() => handleConfirmDelete(employeeId, employeeName)}
                                     style={{
                                       flex: 1,
                                       padding: '0.5rem 0.75rem',
@@ -1295,7 +1303,7 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
                                   </button>
                                   <button
                                     className="chatbot-cancel-delete-btn"
-                                    onClick={() => handleCancelDelete(customerName)}
+                                    onClick={() => handleCancelDelete(employeeName)}
                                     style={{
                                       flex: 1,
                                       padding: '0.5rem 0.75rem',
@@ -1307,44 +1315,56 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
                                       cursor: 'pointer',
                                     }}
                                   >
-                                    Keep Customer
+                                    Keep Employee
                                   </button>
                                 </div>
                               </div>
                             );
                           }
 
-                          // Rich Customer Card on createCustomer
-                          if (toolName === 'createCustomer' && hasResult && result && (result.id || result.email)) {
+                          // Rich Employee Card on createEmployee
+                          if (toolName === 'createEmployee' && hasResult && result && (result.id || result.email || result.employee)) {
                             return (
-                              <CustomerResultCard
+                              <EmployeeResultCard
                                 key={toolCallId}
-                                customer={result}
+                                employee={result.employee || result}
                                 actionType="created"
                                 onAction={handleSuggestedClick}
                               />
                             );
                           }
 
-                          // Rich Customer Card on updateCustomer
-                          if (toolName === 'updateCustomer' && hasResult && result && (result.id || result.email)) {
+                          // Rich Employee Card on updateEmployee
+                          if (toolName === 'updateEmployee' && hasResult && result && (result.id || result.email || result.employee)) {
                             return (
-                              <CustomerResultCard
+                              <EmployeeResultCard
                                 key={toolCallId}
-                                customer={result}
+                                employee={result.employee || result}
                                 actionType="updated"
                                 onAction={handleSuggestedClick}
                               />
                             );
                           }
 
-                          // Rich Customer Card on getCustomer
-                          if (toolName === 'getCustomer' && hasResult && result && (result.id || result.email)) {
+                          // Rich Employee Card on getEmployee
+                          if (toolName === 'getEmployee' && hasResult && result && (result.id || result.email || result.employee)) {
                             return (
-                              <CustomerResultCard
+                              <EmployeeResultCard
                                 key={toolCallId}
-                                customer={result}
+                                employee={result.employee || result}
                                 actionType="viewed"
+                                onAction={handleSuggestedClick}
+                              />
+                            );
+                          }
+
+                          // Rich Employee Card on reactivateEmployee
+                          if (toolName === 'reactivateEmployee' && hasResult && result && (result.id || result.email || result.employee)) {
+                            return (
+                              <EmployeeResultCard
+                                key={toolCallId}
+                                employee={result.employee || result}
+                                actionType="reactivated"
                                 onAction={handleSuggestedClick}
                               />
                             );
@@ -1352,11 +1372,14 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
 
                           // General Tool Status Indicator during execution
                           if (!rawText && toolInvocation.state === 'call') {
-                            let label = 'Processing operation...';
-                            if (toolName === 'getCustomers') label = '🔍 Searching customer database...';
-                            if (toolName === 'createCustomer') label = '✨ Creating customer record...';
-                            if (toolName === 'updateCustomer') label = '✏️ Updating customer record...';
-                            if (toolName === 'deleteCustomer') label = '🗑️ Checking customer record...';
+                            let label = 'Processing personnel operation...';
+                            if (toolName === 'getEmployees') label = '🔍 Searching employee directory...';
+                            if (toolName === 'getEmployee') label = '👤 Fetching employee profile...';
+                            if (toolName === 'createEmployee') label = '✨ Adding new employee...';
+                            if (toolName === 'updateEmployee') label = '✏️ Updating employee profile...';
+                            if (toolName === 'deleteEmployee') label = '🗑️ Processing employee deactivation/deletion...';
+                            if (toolName === 'reactivateEmployee') label = '⚡ Reactivating employee account...';
+                            if (toolName === 'getEmployeeMetrics') label = '📊 Calculating organizational KPI metrics...';
 
                             return (
                               <div
@@ -1389,13 +1412,13 @@ export default function ChatbotWidget({ onCustomerChange }: ChatbotWidgetProps) 
                           return null;
                         })}
 
-                        {/* Copy customer details button (for assistant messages) */}
+                        {/* Copy employee details button (for assistant messages) */}
                         {!isUser && cleanText && (
                           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.45rem' }}>
                             <button
                               type="button"
                               onClick={() => handleCopyMessage(m.id || String(mIndex), cleanText, toolInvocations)}
-                              title="Copy customer details only"
+                              title="Copy employee details only"
                               style={{
                                 background: 'rgba(255, 255, 255, 0.04)',
                                 border: '1px solid rgba(255, 255, 255, 0.08)',

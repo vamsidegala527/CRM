@@ -1,12 +1,13 @@
 {
-  "name": "customer-management-frontend",
+  "name": "hr-employee-management-frontend",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "node --test tests/frontend-security.test.mjs"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.67",

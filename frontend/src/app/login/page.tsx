@@ -148,12 +148,16 @@ export default function LoginPage() {
           return;
         }
 
-        const res = await api.register({ email, password, full_name: fullName });
+        const res = await api.register({
+          email: email.trim().toLowerCase(),
+          password,
+          full_name: fullName.trim(),
+        });
         setSuccessMsg(res.message || 'Registration successful! Verification token generated. Please log in.');
         setAuthMode('signin');
         setPassword('');
       } else if (authMode === 'signin') {
-        await api.login({ email, password });
+        await api.login({ email: email.trim().toLowerCase(), password });
         router.push('/');
       } else if (authMode === 'forgot') {
         if (!email.trim()) {
@@ -236,19 +240,19 @@ export default function LoginPage() {
             margin: '0 auto 1rem',
             boxShadow: '0 8px 24px rgba(99, 102, 241, 0.35)'
           }}>
-            CM
+            HR
           </div>
           <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--text-main)', margin: '0 0 0.5rem' }}>
-            {authMode === 'register' ? 'Create Account' : authMode === 'forgot' ? 'Reset Password' : 'Sign In'}
+            {authMode === 'register' ? 'Create HR/Admin Account' : authMode === 'forgot' ? 'Reset Password' : 'Sign In'}
           </h2>
           <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
             {authMode === 'register'
-              ? 'Register to manage your isolated customer database'
+              ? 'Register your organization HR/Admin account to manage employees'
               : authMode === 'forgot'
                 ? (resetStep === 'request'
                     ? 'Enter your registered email to receive a password-reset link'
                     : 'Check your inbox for the reset link')
-                : 'Sign in to access your customer records'}
+                : 'Sign in to access your HR & Employee Management Portal'}
           </p>
         </div>
 

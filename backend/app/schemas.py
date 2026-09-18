@@ -4,17 +4,8 @@ from typing import Optional, List, Any
 # pyrefly: ignore [missing-import]
 from pydantic import BaseModel, EmailStr, field_validator, model_validator, Field, ConfigDict
 
-VALID_STATUSES = {"Active", "Lead", "Prospect", "Inactive"}
-STATUS_MAP = {
-    "ACTIVE CUSTOMER": "Active",
-    "SALES LEAD": "Lead",
-    "PROSPECT": "Prospect",
-    "INACTIVE": "Inactive",
-    "ACTIVE": "Active",
-    "LEAD": "Lead",
-}
 
-NAME_REGEX = re.compile(r"^[a-zA-Z\s\-\'\.\,]+$")
+NAME_REGEX = re.compile(r"^[a-zA-Z0-9\s\-\'\.\,]+$")
 PHONE_REGEX = re.compile(r"^\+?[0-9\s\-\(\)\.]{7,25}$")
 
 def validate_phone_number(v: Optional[str]) -> Optional[str]:
@@ -41,19 +32,9 @@ def validate_name_string(v: str) -> str:
     if len(v) > 100:
         raise ValueError("Name cannot exceed 100 characters.")
     if not NAME_REGEX.match(v):
-        raise ValueError("Name can only contain letters, spaces, hyphens, apostrophes, periods, and commas.")
+        raise ValueError("Name can only contain letters, numbers, spaces, hyphens, apostrophes, periods, and commas.")
     return v
 
-def normalize_status(v: Optional[str]) -> str:
-    if not v or not v.strip():
-        return "Active"
-    clean = v.strip().upper()
-    if clean in STATUS_MAP:
-        return STATUS_MAP[clean]
-    cap = v.strip().capitalize()
-    if cap in VALID_STATUSES:
-        return cap
-    raise ValueError(f"Invalid status '{v}'. Allowed values: Active Customer, Sales Lead, Prospect, Inactive.")
 
 COMMON_WEAK_PASSWORDS = {
     "password", "password123", "12345678", "123456789", "qwerty123", "admin123",
@@ -97,16 +78,6 @@ def validate_strong_password(v: str) -> str:
         raise ValueError("Password must be at least 8 characters long.")
     if len(v) > 72:
         raise ValueError("Password cannot exceed 72 characters.")
-    if not re.search(r"[A-Z]", v):
-        raise ValueError("Password must contain at least one uppercase letter (A-Z).")
-    if not re.search(r"[a-z]", v):
-        raise ValueError("Password must contain at least one lowercase letter (a-z).")
-    if not re.search(r"\d", v):
-        raise ValueError("Password must contain at least one number (0-9).")
-    if not re.search(r"[!@#$%^&*(),.?\":{}|<>\-_=+[\]\\/;~`]", v):
-        raise ValueError("Password must contain at least one special character (e.g. !@#$%^&*).")
-    if v.lower() in COMMON_WEAK_PASSWORDS:
-        raise ValueError("Password is too common and insecure. Please choose a stronger password.")
     return v
 
 # User Schemas
@@ -190,12 +161,25 @@ class UserResponse(UserBase):
     public_id: Optional[str] = None
     is_active: bool
     is_verified: bool = False
-    role: str = "user"
+    first_login: Optional[bool] = False
+    login_count: Optional[int] = 0
+    is_setup_complete: bool = False
+    phone: Optional[str] = None
+    department: Optional[str] = None
+    job_title: Optional[str] = None
+    company: Optional[str] = None
+    address: Optional[str] = None
+    notes: Optional[str] = None
+    role: str = "admin"
     created_at: datetime
     google_id: Optional[str] = None
     auth_provider: Optional[str] = "email"
-
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("full_name", mode="before")
+    @classmethod
+    def clean_full_name(cls, v: Any) -> str:
+        return str(v).strip() if v is not None else ""
 
 class Token(BaseModel):
     access_token: str
@@ -205,16 +189,15 @@ class Token(BaseModel):
 class TokenData(BaseModel):
     email: Optional[str] = None
 
-
-# Customer Schemas
-class CustomerBase(BaseModel):
-    name: str = Field(..., min_length=2, max_length=100)
+class EmployeeCreate(BaseModel):
     email: EmailStr
-    phone: Optional[str] = Field(None, max_length=25)
+    full_name: str = Field(..., min_length=2, max_length=100)
+    department: Optional[str] = Field(None, max_length=100)
+    job_title: Optional[str] = Field(None, max_length=100)
     company: Optional[str] = Field(None, max_length=100)
     address: Optional[str] = Field(None, max_length=300)
-    status: Optional[str] = "Active"
     notes: Optional[str] = Field(None, max_length=1000)
+    phone: Optional[str] = Field(None, max_length=25)
 
     @field_validator("email", mode="before")
     @classmethod
@@ -222,14 +205,12 @@ class CustomerBase(BaseModel):
         if isinstance(v, str):
             v = v.strip().lower()
             if not v:
-                raise ValueError("Customer email address cannot be empty.")
-            if len(v) > 255:
-                raise ValueError("Email address cannot exceed 255 characters.")
+                raise ValueError("Email cannot be empty.")
         return v
 
-    @field_validator("name", mode="before")
+    @field_validator("full_name", mode="before")
     @classmethod
-    def clean_name(cls, v: str) -> str:
+    def clean_full_name(cls, v: str) -> str:
         return validate_name_string(v)
 
     @field_validator("company", mode="before")
@@ -237,11 +218,7 @@ class CustomerBase(BaseModel):
     def clean_company(cls, v: Optional[str]) -> Optional[str]:
         if isinstance(v, str):
             v = sanitize_input_text(v)
-            if not v:
-                return None
-            if len(v) > 100:
-                raise ValueError("Company name cannot exceed 100 characters.")
-            return v
+            return v if v else None
         return v
 
     @field_validator("address", mode="before")
@@ -249,11 +226,7 @@ class CustomerBase(BaseModel):
     def clean_address(cls, v: Optional[str]) -> Optional[str]:
         if isinstance(v, str):
             v = sanitize_input_text(v)
-            if not v:
-                return None
-            if len(v) > 300:
-                raise ValueError("Address cannot exceed 300 characters.")
-            return v
+            return v if v else None
         return v
 
     @field_validator("notes", mode="before")
@@ -261,11 +234,7 @@ class CustomerBase(BaseModel):
     def clean_notes(cls, v: Optional[str]) -> Optional[str]:
         if isinstance(v, str):
             v = sanitize_input_text(v)
-            if not v:
-                return None
-            if len(v) > 1000:
-                raise ValueError("Notes cannot exceed 1000 characters.")
-            return v
+            return v if v else None
         return v
 
     @field_validator("phone", mode="before")
@@ -273,42 +242,20 @@ class CustomerBase(BaseModel):
     def clean_phone(cls, v: Optional[str]) -> Optional[str]:
         return validate_phone_number(v)
 
-    @field_validator("status", mode="before")
-    @classmethod
-    def validate_status(cls, v: Optional[str]) -> str:
-        return normalize_status(v)
-
-class CustomerCreate(CustomerBase):
-    pass
-
-class CustomerUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=2, max_length=100)
-    email: Optional[EmailStr] = None
-    phone: Optional[str] = Field(None, max_length=25)
+class EmployeeUpdate(BaseModel):
+    full_name: Optional[str] = None
+    department: Optional[str] = Field(None, max_length=100)
+    job_title: Optional[str] = Field(None, max_length=100)
     company: Optional[str] = Field(None, max_length=100)
     address: Optional[str] = Field(None, max_length=300)
-    status: Optional[str] = None
     notes: Optional[str] = Field(None, max_length=1000)
+    phone: Optional[str] = Field(None, max_length=25)
+    is_active: Optional[bool] = None
 
-    @field_validator("email", mode="before")
+    @field_validator("full_name", mode="before")
     @classmethod
-    def clean_email(cls, v: Optional[str]) -> Optional[str]:
-        if isinstance(v, str):
-            v = v.strip().lower()
-            if not v:
-                return None
-            if len(v) > 255:
-                raise ValueError("Email address cannot exceed 255 characters.")
-            return v
-        return v
-
-    @field_validator("name", mode="before")
-    @classmethod
-    def clean_name(cls, v: Optional[str]) -> Optional[str]:
-        if isinstance(v, str):
-            v = v.strip()
-            if not v:
-                return None
+    def clean_full_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
             return validate_name_string(v)
         return v
 
@@ -317,11 +264,7 @@ class CustomerUpdate(BaseModel):
     def clean_company(cls, v: Optional[str]) -> Optional[str]:
         if isinstance(v, str):
             v = sanitize_input_text(v)
-            if not v:
-                return None
-            if len(v) > 100:
-                raise ValueError("Company name cannot exceed 100 characters.")
-            return v
+            return v if v else None
         return v
 
     @field_validator("address", mode="before")
@@ -329,11 +272,7 @@ class CustomerUpdate(BaseModel):
     def clean_address(cls, v: Optional[str]) -> Optional[str]:
         if isinstance(v, str):
             v = sanitize_input_text(v)
-            if not v:
-                return None
-            if len(v) > 300:
-                raise ValueError("Address cannot exceed 300 characters.")
-            return v
+            return v if v else None
         return v
 
     @field_validator("notes", mode="before")
@@ -341,11 +280,7 @@ class CustomerUpdate(BaseModel):
     def clean_notes(cls, v: Optional[str]) -> Optional[str]:
         if isinstance(v, str):
             v = sanitize_input_text(v)
-            if not v:
-                return None
-            if len(v) > 1000:
-                raise ValueError("Notes cannot exceed 1000 characters.")
-            return v
+            return v if v else None
         return v
 
     @field_validator("phone", mode="before")
@@ -353,24 +288,63 @@ class CustomerUpdate(BaseModel):
     def clean_phone(cls, v: Optional[str]) -> Optional[str]:
         return validate_phone_number(v)
 
-    @field_validator("status", mode="before")
+class EmployeeSelfUpdate(BaseModel):
+    full_name: Optional[str] = None
+    department: Optional[str] = Field(None, max_length=100)
+    phone: Optional[str] = Field(None, max_length=25)
+    address: Optional[str] = Field(None, max_length=300)
+
+    @field_validator("full_name", mode="before")
     @classmethod
-    def validate_status(cls, v: Optional[str]) -> Optional[str]:
-        if v is None or (isinstance(v, str) and not v.strip()):
-            return None
-        return normalize_status(v)
+    def clean_full_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            return validate_name_string(v)
+        return v
 
-class CustomerResponse(CustomerBase):
-    id: int
-    public_id: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
-    owner_id: Optional[int] = None
+    @field_validator("phone", mode="before")
+    @classmethod
+    def clean_phone(cls, v: Optional[str]) -> Optional[str]:
+        return validate_phone_number(v)
 
-    model_config = ConfigDict(from_attributes=True)
+    @field_validator("address", mode="before")
+    @classmethod
+    def clean_address(cls, v: Optional[str]) -> Optional[str]:
+        if isinstance(v, str):
+            v = sanitize_input_text(v)
+            return v if v else None
+        return v
 
-class CustomerListResponse(BaseModel):
-    total: int
-    items: List[CustomerResponse]
-    page: int
-    limit: int
+class EmployeeSetupRequest(BaseModel):
+    token: str = Field(..., min_length=1)
+    email: EmailStr
+    new_password: str = Field(..., min_length=8, max_length=72)
+    confirm_password: Optional[str] = None
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        return validate_strong_password(v)
+
+    @model_validator(mode="after")
+    def verify_password_match(self):
+        if self.confirm_password is not None and self.new_password != self.confirm_password:
+            raise ValueError("Passwords do not match. Please confirm your new password.")
+        return self
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=8, max_length=72)
+    confirm_password: Optional[str] = None
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        return validate_strong_password(v)
+
+    @model_validator(mode="after")
+    def verify_password_match(self):
+        if self.confirm_password is not None and self.new_password != self.confirm_password:
+            raise ValueError("Passwords do not match. Please confirm your new password.")
+        return self
+
+

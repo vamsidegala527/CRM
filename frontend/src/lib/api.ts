@@ -1,4 +1,8 @@
-import { Customer, CustomerInput, CustomerListResponse, AuthResponse, User } from '../types/customer';
+import {
+  AuthResponse, User,
+  EmployeeCreateInput, EmployeeUpdateInput, EmployeeSelfUpdateInput,
+  ChangePasswordInput, EmployeeSetupInput, EmployeeMetrics
+} from '../types/employee';
 
 export function getApiBaseUrl(): string {
   // In the browser on a deployed host (Render, Vercel, or custom domain):
@@ -75,10 +79,12 @@ async function wait(ms: number) {
 async function request<T>(
   endpoint: string,
   options: RequestInit = {},
-  timeoutMs: number = 18000,
-  retries: number = 2
+  timeoutMs: number = 30000,
+  retries?: number
 ): Promise<T> {
   const token = getAuthToken();
+  const isSafeMethod = !options.method || options.method.toUpperCase() === 'GET' || options.method.toUpperCase() === 'HEAD';
+  const maxRetries = retries !== undefined ? retries : (isSafeMethod ? 2 : 0);
   
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -93,7 +99,7 @@ async function request<T>(
   let attempt = 0;
   let lastError: any = null;
 
-  while (attempt <= retries) {
+  while (attempt <= maxRetries) {
     attempt++;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -107,8 +113,8 @@ async function request<T>(
       });
       clearTimeout(timeoutId);
 
-      // If backend is waking up (502 Bad Gateway or 504 Gateway Timeout), retry
-      if ([502, 503, 504].includes(response.status) && attempt <= retries) {
+      // If backend is waking up (502 Bad Gateway or 504 Gateway Timeout), retry safe requests
+      if ([502, 503, 504].includes(response.status) && attempt <= maxRetries) {
         await wait(1500 * attempt);
         continue;
       }
@@ -178,7 +184,7 @@ async function request<T>(
       const isNetwork = netErr.name === 'TypeError' || (netErr.message && netErr.message.includes('Failed to fetch'));
 
       // If network or timeout during cold start and attempts remain, back off and retry
-      if ((isAbort || isNetwork) && attempt <= retries) {
+      if ((isAbort || isNetwork) && attempt <= maxRetries) {
         await wait(1500 * attempt);
         continue;
       }
@@ -279,48 +285,84 @@ export const api = {
     return user;
   },
 
-  // Customer Management REST APIs (supports both numeric ID and UUID public_id)
-  async getCustomers(params: { search?: string; status?: string; page?: number; limit?: number } = {}): Promise<CustomerListResponse> {
+  // Employee Setup & Password Management APIs
+  async setupEmployeeAccount(payload: EmployeeSetupInput): Promise<{ message: string }> {
+    return request<{ message: string }>('/api/auth/setup-employee', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async changePassword(payload: ChangePasswordInput): Promise<{ message: string }> {
+    return request<{ message: string }>('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  // Employee Management REST APIs (Admin & Self-Service)
+  async getEmployeeMetrics(): Promise<EmployeeMetrics> {
+    return request<EmployeeMetrics>('/api/employees/metrics');
+  },
+
+  async getEmployees(params: {
+    search?: string;
+    status?: string;
+    account_status?: string;
+    setup_status?: string;
+    skip?: number;
+    limit?: number;
+  } = {}): Promise<User[]> {
     const query = new URLSearchParams();
     if (params.search) query.append('search', params.search);
-    if (params.status) query.append('status', params.status);
-    if (params.page) query.append('page', params.page.toString());
-    if (params.limit) query.append('limit', params.limit.toString());
+    if (params.status && params.status !== 'All') query.append('status', params.status);
+    if (params.account_status && params.account_status !== 'All') query.append('account_status', params.account_status);
+    if (params.setup_status && params.setup_status !== 'All') query.append('setup_status', params.setup_status);
+    if (params.skip !== undefined) query.append('skip', params.skip.toString());
+    if (params.limit !== undefined) query.append('limit', params.limit.toString());
 
     const queryString = query.toString() ? `?${query.toString()}` : '';
-    return request<CustomerListResponse>(`/api/customers${queryString}`);
+    return request<User[]>(`/api/employees${queryString}`);
   },
 
-  async getCustomerById(id: number | string): Promise<Customer> {
-    return request<Customer>(`/api/customers/${id}`);
+  async getEmployeeById(id: number | string): Promise<User> {
+    return request<User>(`/api/employees/${id}`);
   },
 
-  async createCustomer(customer: CustomerInput): Promise<Customer> {
-    return request<Customer>('/api/customers', {
+  async createEmployee(payload: EmployeeCreateInput): Promise<User> {
+    return request<User>('/api/employees', {
       method: 'POST',
-      body: JSON.stringify(customer),
+      body: JSON.stringify(payload),
     });
   },
 
-  // Partial update using PATCH (REST compliant)
-  async updateCustomer(id: number | string, customer: Partial<CustomerInput>): Promise<Customer> {
-    return request<Customer>(`/api/customers/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(customer),
-    });
-  },
-
-  // Full resource replacement using PUT
-  async replaceCustomer(id: number | string, customer: CustomerInput): Promise<Customer> {
-    return request<Customer>(`/api/customers/${id}`, {
+  async updateEmployee(id: number | string, payload: EmployeeUpdateInput | EmployeeSelfUpdateInput): Promise<User> {
+    return request<User>(`/api/employees/${id}`, {
       method: 'PUT',
-      body: JSON.stringify(customer),
+      body: JSON.stringify(payload),
     });
   },
 
-  async deleteCustomer(id: number | string): Promise<{ message: string }> {
-    return request<{ message: string }>(`/api/customers/${id}`, {
+  async reactivateEmployee(id: number | string): Promise<User> {
+    return request<User>(`/api/employees/${id}/reactivate`, {
+      method: 'POST',
+    });
+  },
+
+  async deactivateEmployee(id: number | string, permanent: boolean = false, confirmed: boolean = false): Promise<{ message: string }> {
+    const queryParams = new URLSearchParams();
+    if (permanent) queryParams.append('permanent', 'true');
+    if (confirmed) queryParams.append('confirmed', 'true');
+    const queryString = queryParams.toString() ? `?${queryParams.toString()}` : '';
+    return request<{ message: string }>(`/api/employees/${id}${queryString}`, {
       method: 'DELETE',
     });
   },
+
+  async sendEmployeeLoginEmail(id: number | string): Promise<{ message: string }> {
+    return request<{ message: string }>(`/api/employees/${id}/send-login-email`, {
+      method: 'POST',
+    });
+  },
 };
+

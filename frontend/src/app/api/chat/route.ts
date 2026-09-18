@@ -103,7 +103,7 @@ export async function POST(req: Request) {
     }
 
     if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Please log in to use customer management.' }), {
+      return new Response(JSON.stringify({ error: 'Please log in to access the HR Assistant.' }), {
         status: 401,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -162,42 +162,51 @@ export async function POST(req: Request) {
       }
     };
 
-    const getCustomersSchema = z.object({
-      search: z.string().optional().describe('Search keyword matching name, email, company, or phone'),
-      status: z.string().optional().describe('Filter by status: Active, Lead, Prospect, or Inactive'),
-      page: z.number().optional().default(1),
+    const getEmployeesSchema = z.object({
+      search: z.string().optional().describe('Search keyword matching full name, email, department, job title, phone, company, or public ID'),
+      account_status: z.enum(['All', 'Active', 'Inactive']).optional().describe('Filter by account status: All, Active, or Inactive'),
+      setup_status: z.enum(['All', 'Pending', 'Completed']).optional().describe('Filter by setup status: All, Pending, or Completed'),
+      skip: z.number().optional().default(0),
       limit: z.number().optional().default(20),
     });
 
-    const getCustomerSchema = z.object({
-      customerId: z.number().describe('ID of the customer to retrieve'),
+    const getEmployeeSchema = z.object({
+      employeeId: z.union([z.number(), z.string()]).describe('Numeric ID or public ID of the employee to retrieve'),
     });
 
-    const createCustomerSchema = z.object({
-      name: z.string().describe('Full name of the customer'),
-      email: z.string().describe('Customer email address'),
-      phone: z.string().optional().describe('Phone number'),
-      company: z.string().optional().describe('Company name'),
-      status: z.enum(['Active', 'Lead', 'Prospect', 'Inactive']).optional().default('Active'),
-      address: z.string().optional().describe('Physical address'),
-      notes: z.string().optional().describe('Internal notes or observations'),
+    const createEmployeeSchema = z.object({
+      full_name: z.string().describe('Full legal or preferred name of the employee'),
+      email: z.string().describe('Corporate email address of the employee'),
+      department: z.string().optional().describe('Department name (e.g. Engineering, Sales, HR, Marketing)'),
+      job_title: z.string().optional().describe('Official job title or position'),
+      company: z.string().optional().describe('Company or organization name'),
+      address: z.string().optional().describe('Work location or physical address'),
+      phone: z.string().optional().describe('Contact phone number'),
+      notes: z.string().optional().describe('Internal HR administrative notes'),
     });
 
-    const updateCustomerSchema = z.object({
-      customerId: z.number().describe('ID of the customer to update'),
-      name: z.string().optional().describe('New name'),
-      email: z.string().optional().describe('New email address'),
-      phone: z.string().optional().describe('New phone number'),
-      company: z.string().optional().describe('New company name'),
-      status: z.enum(['Active', 'Lead', 'Prospect', 'Inactive']).optional().describe('New status'),
-      address: z.string().optional().describe('New address'),
-      notes: z.string().optional().describe('New notes'),
+    const updateEmployeeSchema = z.object({
+      employeeId: z.union([z.number(), z.string()]).describe('Numeric ID or public ID of the employee to update'),
+      full_name: z.string().optional().describe('Updated full name'),
+      department: z.string().optional().describe('Updated department'),
+      job_title: z.string().optional().describe('Updated job title'),
+      company: z.string().optional().describe('Updated company name'),
+      address: z.string().optional().describe('Updated address'),
+      phone: z.string().optional().describe('Updated phone number'),
+      notes: z.string().optional().describe('Updated HR notes'),
+      is_active: z.boolean().optional().describe('Active account status (true/false)'),
     });
 
-    const deleteCustomerSchema = z.object({
-      customerId: z.number().describe('ID of the customer to delete'),
-      customerName: z.string().describe('Name of the customer'),
-      confirmed: z.boolean().describe('Set to true only if the user explicitly confirmed deletion'),
+    const deleteEmployeeSchema = z.object({
+      employeeId: z.union([z.number(), z.string()]).describe('Numeric ID or public ID of the employee to delete or deactivate'),
+      employeeName: z.string().describe('Name of the employee'),
+      permanent: z.boolean().optional().default(false).describe('Set to true for permanent database deletion; false for soft deactivation (recommended)'),
+      confirmed: z.boolean().describe('Set to true only if the user explicitly confirmed permanent deletion or deactivation'),
+    });
+
+    const reactivateEmployeeSchema = z.object({
+      employeeId: z.union([z.number(), z.string()]).describe('Numeric ID or public ID of the employee to reactivate'),
+      employeeName: z.string().describe('Name of the employee'),
     });
 
     const maxOutputTokens = process.env.AI_MAX_OUTPUT_TOKENS ? Number(process.env.AI_MAX_OUTPUT_TOKENS) : 600;
@@ -205,134 +214,205 @@ export async function POST(req: Request) {
     const result = streamText({
       model: modelInstance,
       maxOutputTokens,
-      system: `You are an intelligent, friendly, and proactive Customer Management AI Assistant embedded in the Customer Hub application.
-You have direct tool access to live customer data. Help users manage their customer relationships effectively, safely, and delightfully.
+      system: `You are Nexus AI, an intelligent, friendly, and proactive HR Assistant embedded in the HR & Employee Management Portal.
+You have direct tool access to live employee directory data and administrative actions for authorized HR/Admin users. Help administrators manage personnel rosters, onboarding statuses, and access permissions safely and effectively.
+
+ROLE & ACCESS CONTROL RULES:
+- Employee directory management (viewing, listing, creating, updating, deactivating, reactivating, and permanently deleting employees) is strictly restricted to HR/Admin accounts.
+- There are only two user roles in this system: "HR/Admin" and "Employee".
+- If any tool returns an "Access denied" or 403 error, inform the user that their current role does not have permission to perform employee management operations.
 
 CAPABILITIES:
-- View, list, search, filter, and count customers
-- View specific customer details
-- Create new customer records
-- Update existing customer details
-- Delete customer records (with confirmation safety)
-- Provide summaries, insights, and answers about customer statistics
+- View, list, search, filter, and count employees (HR/Admin only)
+- View high-level organizational metrics via getEmployeeMetrics (Total Employees, Active Staff, Inactive Staff, Setup Pending, Setup Completed)
+- View specific employee details (HR/Admin only)
+- Create new employee records and dispatch invitation emails (HR/Admin only)
+- Update existing employee profiles (HR/Admin only)
+- Soft-deactivate or reactivate employee accounts (HR/Admin only)
+- Permanently delete employee records with strict explicit confirmation safety (HR/Admin only)
+- Provide summaries, organizational insights, and breakdown by department or status
 
 CONVERSATION & RESPONSE GUIDELINES:
 1. NATURAL & INTERACTIVE TONE:
    - Greet users warmly and keep answers clear, structured, and easy to scan.
-   - Use bullet points, bold names, and status tags (e.g. **Active**, **Lead**, **Prospect**, **Inactive**).
-   - After completing an action or answering, offer a relevant follow-up or next step (e.g. "Would you like me to update their notes or phone number?").
+   - Use bullet points, bold names, and status tags (e.g. **Active**, **Inactive**, **Setup Pending**, **Setup Complete**).
+   - After completing an action, offer a relevant follow-up or next step.
 2. SMART HANDLING OF INCOMPLETE OR UNCLEAR REQUESTS:
-   - When creating customers: "name" and "email" are REQUIRED. If the user only gives a name (e.g. "Add Sarah"), DO NOT call createCustomer yet. Ask a friendly clarifying question: "I'd love to add Sarah! What is Sarah's email address and company name?"
-   - When updating: If customer ID is unknown, search for the customer by name or email first, then ask or proceed with the right record.
-   - If multiple customers match, list them clearly and ask which one they wish to modify.
-3. CLEAR CONFIRMATIONS:
-   - After creating, updating, or deleting a customer, give an explicit summary of the record (Name, Email, Status, Company).
-4. PERMANENT DELETION SAFETY:
-   - When the user asks to delete (e.g., "Delete Rahul"), if confirmed: false or not explicitly confirmed yet, invoke deleteCustomer with confirmed: false to show the safety confirmation card.
-5. CONTEXT-AWARE SMART SUGGESTIONS:
-   - At the VERY END of your assistant response, whenever helpful, append 2 to 4 contextual follow-up suggestions on a new line in this EXACT format:
+   - When creating employees: "full_name" and "email" are REQUIRED. If missing, politely ask for them.
+   - When updating or deleting: If employee ID is unknown, search by name or email first.
+3. PERMANENT DELETION SAFETY:
+   - Permanent deletion is irreversible and requires confirmed=true.
+   - Deactivation (soft-delete) is the recommended default.
+   - If permanent deletion is requested and confirmed is false, ask the user to explicitly confirm before proceeding.
+4. CONTEXT-AWARE SMART SUGGESTIONS:
+   - At the VERY END of your response, append 2 to 4 contextual follow-up suggestions on a new line in this EXACT format:
      [SUGGESTIONS: "Option 1", "Option 2", "Option 3"]
-   - Examples:
-     * After listing customers: [SUGGESTIONS: "➕ Add a new customer", "⚡ Filter Active only", "📊 Customer breakdown"]
-     * After creating a customer: [SUGGESTIONS: "✏️ Update details", "📋 Show all customers", "➕ Add another customer"]
-     * After search returns results: [SUGGESTIONS: "👁️ View customer details", "✏️ Edit customer", "📋 Show all customers"]
-     * After greeting/help request: [SUGGESTIONS: "📋 Show all my customers", "➕ Add a new customer", "📊 How many customers do I have?"]
-6. DATA SECURITY & ISOLATION:
-   - All backend API calls automatically enforce user authentication and data isolation. Never invent fake customer data.`,
+5. DATA SECURITY & ACCURACY:
+   - All backend API calls enforce authentication and RBAC data isolation. Never invent fake employee records.`,
       messages,
       stopWhen: stepCountIs(5),
       onError: (error: any) => {
         console.error('[streamText Execution Error]:', error);
       },
       tools: {
-        getCustomers: tool({
-          description: 'Fetch, search, filter, or count customers belonging to the authenticated user.',
-          inputSchema: getCustomersSchema,
-          parameters: getCustomersSchema,
-          execute: async ({ search, status, page, limit }: any) => {
+        getEmployees: tool({
+          description: 'Fetch, search, filter, or count employees in the directory.',
+          inputSchema: getEmployeesSchema,
+          parameters: getEmployeesSchema,
+          execute: async ({ search, account_status, setup_status, skip, limit }: any) => {
             try {
               const query = new URLSearchParams();
               if (search) query.append('search', search);
-              if (status && status !== 'All') query.append('status', status);
-              query.append('page', String(page || 1));
+              if (account_status && account_status !== 'All') query.append('account_status', account_status);
+              if (setup_status && setup_status !== 'All') query.append('setup_status', setup_status);
+              query.append('skip', String(skip || 0));
               query.append('limit', String(limit || 20));
-              return await fetchBackend(`/api/customers?${query.toString()}`);
+              return await fetchBackend(`/api/employees?${query.toString()}`);
             } catch (err: any) {
-              return { error: err.message || 'Failed to retrieve customers.' };
+              return { error: err.message || 'Failed to retrieve employees.' };
             }
           },
         } as any),
 
-        getCustomer: tool({
-          description: 'Get a specific customer record by customer ID.',
-          inputSchema: getCustomerSchema,
-          parameters: getCustomerSchema,
-          execute: async ({ customerId }: any) => {
+        getEmployeeMetrics: tool({
+          description: 'Retrieve real-time organizational KPIs: Total Employees, Active Staff, Inactive Staff, Setup Pending, Setup Completed.',
+          inputSchema: z.object({}),
+          parameters: z.object({}),
+          execute: async () => {
             try {
-              return await fetchBackend(`/api/customers/${customerId}`);
+              return await fetchBackend('/api/employees/metrics');
             } catch (err: any) {
-              return { error: err.message || `Customer #${customerId} not found.` };
+              return { error: err.message || 'Failed to retrieve employee metrics.' };
             }
           },
         } as any),
 
-        createCustomer: tool({
-          description: 'Create a new customer record tied to the authenticated user.',
-          inputSchema: createCustomerSchema,
-          parameters: createCustomerSchema,
-          execute: async (customerData: any) => {
+        getEmployee: tool({
+          description: 'Get a specific employee profile by numeric ID or public ID.',
+          inputSchema: getEmployeeSchema,
+          parameters: getEmployeeSchema,
+          execute: async ({ employeeId }: any) => {
             try {
-              return await fetchBackend('/api/customers', {
+              return await fetchBackend(`/api/employees/${employeeId}`);
+            } catch (err: any) {
+              return { error: err.message || `Employee #${employeeId} not found.` };
+            }
+          },
+        } as any),
+
+        createEmployee: tool({
+          description: 'Create a new employee record and trigger their account setup invitation.',
+          inputSchema: createEmployeeSchema,
+          parameters: createEmployeeSchema,
+          execute: async (employeeData: any) => {
+            try {
+              return await fetchBackend('/api/employees', {
                 method: 'POST',
-                body: JSON.stringify(customerData),
+                body: JSON.stringify(employeeData),
               });
             } catch (err: any) {
-              return { error: err.message || 'Failed to create customer.' };
+              return { error: err.message || 'Failed to create employee.' };
             }
           },
         } as any),
 
-        updateCustomer: tool({
-          description: 'Update an existing customer record by customer ID.',
-          inputSchema: updateCustomerSchema,
-          parameters: updateCustomerSchema,
-          execute: async ({ customerId, ...updateFields }: any) => {
+        updateEmployee: tool({
+          description: 'Update an existing employee profile by ID.',
+          inputSchema: updateEmployeeSchema,
+          parameters: updateEmployeeSchema,
+          execute: async ({ employeeId, ...updateFields }: any) => {
             try {
-              return await fetchBackend(`/api/customers/${customerId}`, {
+              return await fetchBackend(`/api/employees/${employeeId}`, {
                 method: 'PUT',
                 body: JSON.stringify(updateFields),
               });
             } catch (err: any) {
-              return { error: err.message || `Failed to update customer #${customerId}.` };
+              return { error: err.message || `Failed to update employee #${employeeId}.` };
             }
           },
         } as any),
 
-        deleteCustomer: tool({
-          description: 'Delete a customer record by ID.',
-          inputSchema: deleteCustomerSchema,
-          parameters: deleteCustomerSchema,
-          execute: async ({ customerId, customerName, confirmed }: any) => {
-            if (!confirmed) {
-              return {
-                requiresConfirmation: true,
-                customerId,
-                customerName,
-                message: `Are you sure you want to delete customer "${customerName}" (ID #${customerId})? This action cannot be undone.`,
-              };
-            }
+        deactivateEmployee: tool({
+          description: 'Deactivate an employee (soft-delete), revoking their active sessions while keeping records intact.',
+          inputSchema: z.object({
+            employeeId: z.union([z.number(), z.string()]).describe('Employee ID or public ID'),
+            employeeName: z.string().describe('Name of the employee'),
+          }),
+          parameters: z.object({
+            employeeId: z.union([z.number(), z.string()]),
+            employeeName: z.string(),
+          }),
+          execute: async ({ employeeId, employeeName }: any) => {
             try {
-              const res = await fetchBackend(`/api/customers/${customerId}`, {
+              const res = await fetchBackend(`/api/employees/${employeeId}?permanent=false`, {
                 method: 'DELETE',
               });
               return {
                 success: true,
-                customerId,
-                customerName,
-                message: res.message || `Customer "${customerName}" deleted successfully.`,
+                employeeId,
+                employeeName,
+                message: res.message || `Employee "${employeeName}" deactivated successfully.`,
               };
             } catch (err: any) {
-              return { error: err.message || `Failed to delete customer #${customerId}.` };
+              return { error: err.message || `Failed to deactivate employee #${employeeId}.` };
+            }
+          },
+        } as any),
+
+        reactivateEmployee: tool({
+          description: 'Reactivate an inactive employee account so they can log in again.',
+          inputSchema: reactivateEmployeeSchema,
+          parameters: reactivateEmployeeSchema,
+          execute: async ({ employeeId, employeeName }: any) => {
+            try {
+              const res = await fetchBackend(`/api/employees/${employeeId}/reactivate`, {
+                method: 'POST',
+              });
+              return {
+                success: true,
+                employeeId,
+                employeeName,
+                message: `Employee "${employeeName}" reactivated successfully.`,
+                employee: res,
+              };
+            } catch (err: any) {
+              return { error: err.message || `Failed to reactivate employee #${employeeId}.` };
+            }
+          },
+        } as any),
+
+        deleteEmployee: tool({
+          description: 'Permanently delete an employee record from the database. Requires explicit confirmation.',
+          inputSchema: deleteEmployeeSchema,
+          parameters: deleteEmployeeSchema,
+          execute: async ({ employeeId, employeeName, permanent, confirmed }: any) => {
+            if (permanent && !confirmed) {
+              return {
+                requiresConfirmation: true,
+                employeeId,
+                employeeName,
+                permanent: true,
+                message: `Are you sure you want to permanently delete employee "${employeeName}" (ID #${employeeId})? This action is irreversible and removes all employee data.`,
+              };
+            }
+            try {
+              const query = new URLSearchParams();
+              if (permanent) {
+                query.append('permanent', 'true');
+                query.append('confirmed', 'true');
+              }
+              const res = await fetchBackend(`/api/employees/${employeeId}?${query.toString()}`, {
+                method: 'DELETE',
+              });
+              return {
+                success: true,
+                employeeId,
+                employeeName,
+                permanent: Boolean(permanent),
+                message: res.message || `Employee "${employeeName}" ${permanent ? 'permanently deleted' : 'deactivated'} successfully.`,
+              };
+            } catch (err: any) {
+              return { error: err.message || `Failed to delete employee #${employeeId}.` };
             }
           },
         } as any),

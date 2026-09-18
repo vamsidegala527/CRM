@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base, sync_db_schema
 from app.config import settings
-from app.routers import auth, customers
+from app.routers import auth, employees
 
 try:
     Base.metadata.create_all(bind=engine)
@@ -20,9 +20,9 @@ IS_PROD = (
 )
 
 app = FastAPI(
-    title="Customer Management REST API",
-    description="Backend Python REST API for Customer Management with Admin Authentication and PostgreSQL",
-    version="1.2.0",
+    title="HR & Employee Management Portal REST API",
+    description="Backend Python REST API for HR & Employee Management Portal with RBAC, PostgreSQL, and Nexus AI",
+    version="2.0.0",
     docs_url=None if IS_PROD else "/docs",
     redoc_url=None if IS_PROD else "/redoc",
     openapi_url=None if IS_PROD else "/openapi.json"
@@ -81,13 +81,13 @@ app.add_middleware(
 
 # Register API Routers
 app.include_router(auth.router)
-app.include_router(customers.router)
+app.include_router(employees.router)
 
 @app.get("/")
 def read_root():
     data = {
         "status": "online",
-        "message": "Customer Management REST API is running",
+        "message": "HR & Employee Management Portal REST API is running",
         "database": "PostgreSQL",
         "auth": "Authentication Required"
     }

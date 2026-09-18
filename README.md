@@ -1,135 +1,101 @@
-# Basic Customer Management Web Application (PostgreSQL Dedicated)
+# HR & Employee Management Portal
 
-A simple, production-ready Customer Management web application built from scratch. This application serves as the foundation for managing customer data and will later be extended with AI capabilities.
+A modern, production-grade HR & Employee Management Portal built with FastAPI, Next.js, PostgreSQL, and Nexus AI. Designed for enterprise workforce administration with role-based access control (RBAC), employee self-service, secure onboarding invitations, and natural language workforce analytics.
+
+---
 
 ## Architecture Overview
 
 ```
-Frontend (Next.js / React / TypeScript)
+Frontend (Next.js 14 / React 18 / TypeScript / Tailwind-free Glassmorphic Design System)
        │
-       ▼ REST API (HTTP / JSON / JWT Auth)
-Backend (Python FastAPI / Pydantic / Passlib / SQLAlchemy)
+       ▼ REST API (HTTP / JSON / JWT Auth / HttpOnly Cookies)
+Backend (Python FastAPI / SQLAlchemy / Pydantic / Passlib Bcrypt / PyJWT)
+       │
+       ├──► Nexus AI Assistant (Vercel AI SDK / Google Gemini / Groq)
        │
        ▼ Database Driver (psycopg2-binary)
-PostgreSQL Database (users & customers relational tables)
+PostgreSQL Database (Users & Employee Profiles with strict RBAC)
 ```
 
 ---
 
 ## Tech Stack
 
-- **Frontend**: Next.js (React), TypeScript, Custom CSS Design System (Dark mode & Glassmorphism)
-- **Backend**: Python (FastAPI), Pydantic validation, Passlib bcrypt hashing, PyJWT authentication
-- **Database**: PostgreSQL (Docker container / local PostgreSQL instance)
-- **API**: RESTful API with Swagger / OpenAPI UI at `/docs`
-- **Version Control**: Git
+- **Frontend**: Next.js 14, React 18, TypeScript, Vanilla CSS Design System (Sleek Dark Mode, Glassmorphism, Micro-animations)
+- **Backend**: Python 3.11, FastAPI, Pydantic, SQLAlchemy, Passlib (Bcrypt), PyJWT
+- **AI Copilot**: Nexus AI workforce assistant with tool execution for HR directory search, profile updates, and real-time metrics
+- **Database**: PostgreSQL 16 (relational schema with automated database synchronization)
+- **Security**: Strict Role-Based Access Control (Admin / Employee), cryptographic onboarding tokens, CSRF protection, OWASP security headers
 
 ---
 
-## Features
+## Key Features
 
-1. **User Authentication**:
-   - Register new user accounts.
-   - Secure login with JWT Access Tokens.
-   - Demo account preset (`admin@example.com` / `admin123`).
+### 1. Role-Based Access Control (RBAC)
+- **HR / Admin**:
+  - Full employee lifecycle management: onboard, inspect, edit, deactivate, reactivate, and permanently delete staff.
+  - Granular directory search, multi-field filtering (department, job title, role, status), and server-side pagination.
+  - Onboarding setup invitation links sent via SMTP with cryptographically secure single-use tokens.
+  - Interactive workforce metrics dashboard (total headcount, active staff, onboarding pending, departments count).
+- **Employee**:
+  - Secure self-service profile inspection and updates (phone, address, emergency contact notes).
+  - Restricted view preventing unauthorized modifications to roles, departments, or administrative records.
+  - Guided first-time account setup flow with credential configuration and onboarding wizard.
 
-2. **Customer CRUD Operations**:
-   - **View Customers**: High-performance interactive data table with status badges and details inspector.
-   - **Add Customer**: Modal dialog to create new customer records with validation.
-   - **Edit Customer**: Update existing customer details (Name, Email, Phone, Company, Address, Status, Notes).
-   - **Delete Customer**: Modal confirmation prompt before permanent deletion.
-   - **Search & Filter**: Real-time full-text search (Name, Email, Company, Phone) and Status filtering.
-   - **Pagination**: Server-side pagination support.
+### 2. Employee Directory & Profile Management
+- High-performance interactive workforce directory with live search and status badges.
+- Detailed employee profile drawer with contact information, department classification, and onboarding status.
+- Modal dialogues for onboarding new staff, modifying employment details, and confirming lifecycle state transitions.
 
-3. **Customer Data Fields**:
-   - Name, Email, Phone, Company, Address, Status (`Active`, `Lead`, `Prospect`, `Inactive`), Notes, Created At, Updated At.
-
----
-
-## Getting Started: Step-by-Step Guide
-
-### Step 1: Start PostgreSQL Database
-
-Run PostgreSQL via Docker Compose:
-```bash
-docker compose up -d
-```
-*Or ensure your local PostgreSQL server is running on port 5432 with database name `customer_db`.*
+### 3. Nexus AI Workforce Assistant
+- Embedded AI copilot accessible from any dashboard page.
+- Direct tool integration for querying employee metrics, searching workforce records, and managing staff profiles using natural language.
+- Real-time action cards and confirmation dialogues for sensitive actions.
 
 ---
 
-### Step 2: Set Up & Run Python Backend
+## Quick Start (Docker Compose)
 
-1. Navigate to the backend directory:
+### 1. Launch All Services
 ```bash
-cd backend
+docker compose up -d --build
 ```
 
-2. Create and activate a Python virtual environment:
-```bash
-python -m venv .venv
-# Windows PowerShell:
-.venv\Scripts\Activate.ps1
-```
-
-3. Install requirements:
-```bash
-pip install -r requirements.txt
-```
-
-4. Seed initial database records (Admin user & sample customers):
-```bash
-python app/seed.py
-```
-
-5. Launch FastAPI server:
-```bash
-python -m uvicorn app.main:app --reload --port 8000
-```
-*Backend API docs will be available at: `http://localhost:8000/docs`*
+### 2. Access the Applications
+- **Frontend Portal**: [http://localhost:3000](http://localhost:3000)
+- **Backend REST API**: [http://localhost:8000](http://localhost:8000)
+- **Interactive API Documentation (Docs)**: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ---
 
-### Step 3: Set Up & Run Next.js Frontend
+## Environment Configuration
 
-1. Open a new terminal and navigate to the frontend directory:
-```bash
-cd frontend
-```
+Key configuration parameters can be set in `backend/.env` or passed via environment variables:
 
-2. Install Node dependencies:
-```bash
-npm install
-```
-
-3. Start the Next.js development server:
-```bash
-npm run dev
-```
-*Frontend application will be accessible at: `http://localhost:3000`*
-
----
-
-## Backend REST API Reference
-
-| Method | Endpoint | Description | Auth Required |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/api/auth/register` | Register a new user | No |
-| `POST` | `/api/auth/login` | Login and acquire JWT token | No |
-| `GET` | `/api/auth/me` | Fetch logged-in user details | Yes |
-| `GET` | `/api/customers` | List customers (with search & filter) | Yes |
-| `GET` | `/api/customers/{id}` | Get customer by ID | Yes |
-| `POST` | `/api/customers` | Create a new customer | Yes |
-| `PUT` | `/api/customers/{id}` | Update existing customer | Yes |
-| `DELETE` | `/api/customers/{id}` | Delete customer by ID | Yes |
+| Variable | Description | Default |
+|---|---|---|
+| `DATABASE_URL` | PostgreSQL connection string | `postgresql://postgres:postgrespassword@localhost:5432/hr_db` |
+| `SECRET_KEY` | JWT encryption secret | Production-grade secret key |
+| `ALGORITHM` | JWT signing algorithm | `HS256` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Session validity in minutes | `1440` (24 hours) |
+| `SMTP_HOST` | Outgoing email server | `smtp.gmail.com` |
+| `SMTP_PORT` | Outgoing email port | `587` |
+| `SMTP_USER` | Email username / sender address | System email |
+| `SMTP_PASSWORD` | App-specific password | System password |
+| `SMTP_FROM_NAME` | Sender name on invitations | `HR & Employee Management Portal` |
+| `FRONTEND_URL` | Frontend origin for onboarding links | `http://localhost:3000` |
 
 ---
 
-## Git Version Control Setup
+## Verification & Testing
 
-Initialize your Git repository:
+Run the backend test suite:
 ```bash
-git init
-git add .
-git commit -m "Initial commit: Basic Customer Management Web Application with FastAPI & PostgreSQL"
+docker compose exec backend pytest
+```
+
+Run frontend security regression suite:
+```bash
+docker compose exec frontend npm test
 ```
