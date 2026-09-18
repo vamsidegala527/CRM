@@ -33,6 +33,7 @@ PostgreSQL Database (Users & Employee Profiles with strict RBAC)
 ## Key Features
 
 ### 1. Role-Based Access Control (RBAC)
+
 - **HR / Admin**:
   - Full employee lifecycle management: onboard, inspect, edit, deactivate, reactivate, and permanently delete staff.
   - Granular directory search, multi-field filtering (department, job title, role, status), and server-side pagination.
@@ -44,11 +45,13 @@ PostgreSQL Database (Users & Employee Profiles with strict RBAC)
   - Guided first-time account setup flow with credential configuration and onboarding wizard.
 
 ### 2. Employee Directory & Profile Management
+
 - High-performance interactive workforce directory with live search and status badges.
 - Detailed employee profile drawer with contact information, department classification, and onboarding status.
 - Modal dialogues for onboarding new staff, modifying employment details, and confirming lifecycle state transitions.
 
 ### 3. Nexus AI Workforce Assistant
+
 - Embedded AI copilot accessible from any dashboard page.
 - Direct tool integration for querying employee metrics, searching workforce records, and managing staff profiles using natural language.
 - Real-time action cards and confirmation dialogues for sensitive actions.
@@ -58,11 +61,13 @@ PostgreSQL Database (Users & Employee Profiles with strict RBAC)
 ## Quick Start (Docker Compose)
 
 ### 1. Launch All Services
+
 ```bash
 docker compose up -d --build
 ```
 
 ### 2. Access the Applications
+
 - **Frontend Portal**: [http://localhost:3000](http://localhost:3000)
 - **Backend REST API**: [http://localhost:8000](http://localhost:8000)
 - **Interactive API Documentation (Docs)**: [http://localhost:8000/docs](http://localhost:8000/docs)
@@ -73,29 +78,33 @@ docker compose up -d --build
 
 Key configuration parameters can be set in `backend/.env` or passed via environment variables:
 
-| Variable | Description | Default |
-|---|---|---|
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql://postgres:postgrespassword@localhost:5432/hr_db` |
-| `SECRET_KEY` | JWT encryption secret | Production-grade secret key |
-| `ALGORITHM` | JWT signing algorithm | `HS256` |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | Session validity in minutes | `1440` (24 hours) |
-| `SMTP_HOST` | Outgoing email server | `smtp.gmail.com` |
-| `SMTP_PORT` | Outgoing email port | `587` |
-| `SMTP_USER` | Email username / sender address | System email |
-| `SMTP_PASSWORD` | App-specific password | System password |
-| `SMTP_FROM_NAME` | Sender name on invitations | `HR & Employee Management Portal` |
-| `FRONTEND_URL` | Frontend origin for onboarding links | `http://localhost:3000` |
+| Variable                      | Description                                                                               | Default                                                       |
+| ----------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `DATABASE_URL`                | PostgreSQL connection string                                                              | `postgresql://postgres:postgrespassword@localhost:5432/hr_db` |
+| `SECRET_KEY`                  | JWT encryption secret                                                                     | Production-grade secret key                                   |
+| `ALGORITHM`                   | JWT signing algorithm                                                                     | `HS256`                                                       |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Session validity in minutes                                                               | `1440` (24 hours)                                             |
+| `SMTP_HOST`                   | Outgoing SMTP server supplied by your provider                                            | `smtp.gmail.com`                                              |
+| `SMTP_PORT`                   | Outgoing SMTP port supplied by your provider; `2525` is commonly available on cloud hosts | `587`                                                         |
+| `SMTP_USER`                   | Email username / sender address                                                           | System email                                                  |
+| `SMTP_PASSWORD`               | App-specific password                                                                     | System password                                               |
+| `SMTP_FROM_NAME`              | Sender name on invitations                                                                | `HR & Employee Management Portal`                             |
+| `FRONTEND_URL`                | Frontend origin for onboarding links                                                      | `http://localhost:3000`                                       |
+
+For production deployments, configure the SMTP host, username, password, sender, and provider-supported port in Render. If ports `587` and `465` are blocked, use an SMTP provider that supports port `2525`; changing the port alone cannot make `smtp.gmail.com` reachable.
 
 ---
 
 ## Verification & Testing
 
 Run the backend test suite:
+
 ```bash
 docker compose exec backend pytest
 ```
 
 Run frontend security regression suite:
+
 ```bash
 docker compose exec frontend npm test
 ```

@@ -14,11 +14,11 @@ def is_smtp_configured() -> bool:
     return bool(settings.SMTP_USER and settings.SMTP_PASSWORD and settings.SMTP_HOST)
 
 def is_email_service_configured() -> bool:
-    """Checks if SMTP credentials are configured."""
+    """Checks if SMTP credentials have been configured."""
     return is_smtp_configured()
 
 def _send_mime_message(to_email: str, subject: str, html_body: str, text_body: str) -> None:
-    """Sends a multipart email via Gmail SMTP with dual-port resilience (587 STARTTLS & 465 SSL)."""
+    """Sends a multipart email through the configured SMTP server."""
     if is_smtp_configured():
         from_email = settings.SMTP_FROM_EMAIL.strip() if settings.SMTP_FROM_EMAIL.strip() else settings.SMTP_USER.strip()
         from_name = settings.SMTP_FROM_NAME.strip() if settings.SMTP_FROM_NAME.strip() else "HR & Employee Management Portal"
@@ -36,7 +36,7 @@ def _send_mime_message(to_email: str, subject: str, html_body: str, text_body: s
         smtp_host = settings.SMTP_HOST.strip() or "smtp.gmail.com"
         smtp_user = settings.SMTP_USER.strip()
 
-        # Dual-port resilience: try configured port, then fallback port (465 SSL or 587 STARTTLS)
+        # Try the configured provider port first, then the alternate secure port.
         ports_to_try = [settings.SMTP_PORT]
         alt_port = 465 if settings.SMTP_PORT != 465 else 587
         if alt_port not in ports_to_try:
@@ -58,14 +58,14 @@ def _send_mime_message(to_email: str, subject: str, html_body: str, text_body: s
                 server.login(smtp_user, clean_password)
                 server.sendmail(from_email, [to_email], msg.as_string())
                 server.quit()
-                print(f"✅ [GMAIL SMTP] Email successfully delivered to {to_email} via port {port}")
+                print(f"✅ [SMTP] Email successfully delivered to {to_email} via port {port}")
                 return
             except smtplib.SMTPAuthenticationError as auth_err:
-                print(f"❌ [GMAIL SMTP] Authentication Failed: {auth_err}")
+                print(f"❌ [SMTP] Authentication Failed: {auth_err}")
                 delivery_error = auth_err
                 break
             except Exception as exc:
-                print(f"⚠️ [GMAIL SMTP] Connection on port {port} failed: {exc}")
+                print(f"⚠️ [SMTP] Connection on port {port} failed: {exc}")
                 delivery_error = exc
 
         raise EmailDeliveryError(f"Email delivery failed via SMTP (tried ports {ports_to_try}): {str(delivery_error)}")
@@ -79,8 +79,8 @@ def _send_mime_message(to_email: str, subject: str, html_body: str, text_body: s
     print(text_body)
     print("=" * 65 + "\n")
     raise EmailDeliveryError(
-        "Email delivery service is not configured (SMTP_USER and SMTP_PASSWORD are missing in .env). "
-        "Please add your 16-character Gmail App Password to send real emails to any inbox."
+        "Email delivery service is not configured (SMTP_HOST, SMTP_USER, and SMTP_PASSWORD are missing in .env). "
+        "Configure the SMTP credentials supplied by your email provider to send real emails."
     )
 
 def send_verification_email(to_email: str, user_name: str, code: str, frontend_url: str = None) -> None:
