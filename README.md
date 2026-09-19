@@ -37,7 +37,7 @@ PostgreSQL Database (Users & Employee Profiles with strict RBAC)
 - **HR / Admin**:
   - Full employee lifecycle management: onboard, inspect, edit, deactivate, reactivate, and permanently delete staff.
   - Granular directory search, multi-field filtering (department, job title, role, status), and server-side pagination.
-  - Onboarding setup invitation links sent via SMTP with cryptographically secure single-use tokens.
+  - Onboarding setup invitation links sent via Brevo email service with cryptographically secure single-use tokens.
   - Interactive workforce metrics dashboard (total headcount, active staff, onboarding pending, departments count).
 - **Employee**:
   - Secure self-service profile inspection and updates (phone, address, emergency contact notes).
