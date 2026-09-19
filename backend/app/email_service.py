@@ -206,23 +206,25 @@ This password-reset link expires in 1 hour. If you did not request a password re
 
 def send_employee_setup_email(to_email: str, employee_name: str, token: str, frontend_url: str = None) -> None:
     """Sends a secure first-time login setup email for a new or existing employee with unthreaded distinct subject."""
+    import urllib.parse
+    clean_token = token.strip()
+    clean_email = to_email.strip()
+    quoted_token = urllib.parse.quote(clean_token)
+    quoted_email = urllib.parse.quote(clean_email)
     base_url = (frontend_url or settings.FRONTEND_URL or "http://localhost:3000").strip().rstrip('/')
-    setup_url = f"{base_url}/setup-employee?token={token}&email={to_email}"
-    inv_code = token[:8].upper()
+    setup_url = f"{base_url}/setup-employee?token={quoted_token}&email={quoted_email}"
+    inv_code = clean_token[:8].upper()
     sent_time = datetime.utcnow().strftime('%b %d, %H:%M UTC')
-    subject = f"Set Up Your Employee Account [Code: {inv_code}] - HR Portal"
+    subject = "HR Portal - Welcome to the Team!"
 
     text_body = f"""Hello {employee_name},
 
 An administrator has invited you to join the HR & Employee Management Portal.
 
-Invitation Code: #{inv_code}
-Generated: {sent_time}
-
 Please use the secure link below to set up your account password and get started:
 {setup_url}
 
-This invitation link expires in 48 hours. If you received multiple emails, use only this latest link (Code: #{inv_code}).
+This invitation link expires in 48 hours. If you received multiple invitation emails, please use the link in the newest email.
 """
 
     html_body = f"""<!DOCTYPE html>
@@ -233,7 +235,6 @@ This invitation link expires in 48 hours. If you received multiple emails, use o
     body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0B0F19; color: #F1F5F9; margin: 0; padding: 20px; }}
     .card {{ max-width: 520px; margin: 0 auto; background: #111827; border: 1px solid #1F2937; border-radius: 12px; padding: 32px; box-shadow: 0 8px 30px rgba(0,0,0,0.5); }}
     .brand {{ display: inline-block; background: linear-gradient(135deg, #6366F1, #06B6D4); color: white; font-weight: 800; font-size: 1.1rem; padding: 6px 14px; border-radius: 8px; margin-bottom: 20px; }}
-    .badge {{ display: inline-block; background: rgba(99, 102, 241, 0.2); border: 1px solid rgba(99, 102, 241, 0.5); color: #A5B4FC; font-family: monospace; font-size: 0.85rem; padding: 4px 10px; border-radius: 6px; margin-bottom: 16px; font-weight: 600; }}
     h1 {{ font-size: 1.4rem; color: #FFFFFF; margin: 0 0 12px; }}
     p {{ font-size: 0.95rem; line-height: 1.6; color: #94A3B8; margin: 0 0 20px; }}
     .btn {{ display: inline-block; background: linear-gradient(135deg, #6366F1, #4F46E5); color: #FFFFFF !important; font-weight: 700; font-size: 0.95rem; text-decoration: none; padding: 12px 28px; border-radius: 8px; margin: 10px 0 20px; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4); }}
@@ -244,8 +245,6 @@ This invitation link expires in 48 hours. If you received multiple emails, use o
 <body>
   <div class="card">
     <div class="brand">HR & Employee Management Portal</div>
-    <br>
-    <div class="badge">Invitation Code: #{inv_code}</div>
     <h1>Welcome to the Team!</h1>
     <p>Hi <strong>{employee_name}</strong>,</p>
     <p>An administrator has invited you to access your employee account on the HR & Employee Management Portal. Click the button below to set your password and complete your account setup:</p>
@@ -259,7 +258,7 @@ This invitation link expires in 48 hours. If you received multiple emails, use o
 
     <div class="footer">
       Generated on {sent_time} (expires in 48 hours).<br>
-      If you received multiple emails, use only this latest link (Code: #{inv_code}).
+      If you received multiple invitation emails, please use the link in the newest email.
     </div>
   </div>
 </body>

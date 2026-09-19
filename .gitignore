@@ -15,6 +15,7 @@ out/
 build/
 dist/
 *.log
+*.tsbuildinfo
 
 # Environment variables and secrets
 .env

@@ -19,6 +19,17 @@ export interface User {
   address?: string | null;
   notes?: string | null;
   created_at: string;
+  setup_url?: string | null;
+  invitation_code?: string | null;
+}
+
+export interface EmployeeSetupLinkResponse {
+  message?: string;
+  setup_url?: string;
+  invitation_code?: string;
+  is_setup_complete?: boolean;
+  email_delivered?: boolean;
+  email_error?: string;
 }
 
 export interface EmployeeCreateInput {

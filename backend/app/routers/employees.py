@@ -3,7 +3,7 @@ import hashlib
 from datetime import datetime, timedelta
 from typing import Optional, List, Union
 # pyrefly: ignore [missing-import]
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query, BackgroundTasks
 # pyrefly: ignore [missing-import]
 from sqlalchemy.orm import Session
 # pyrefly: ignore [missing-import]
@@ -14,7 +14,7 @@ from app.models import User
 from app.schemas import (
     UserResponse, EmployeeCreate, EmployeeUpdate, EmployeeSelfUpdate
 )
-from app.auth import get_current_user, require_admin
+from app.auth import get_current_user, require_admin, generate_employee_setup_token
 from app.email_service import send_employee_setup_email
 from app.routers.auth import get_frontend_base_url
 
@@ -129,6 +129,7 @@ def get_employee_metrics(
 def create_employee(
     request: Request,
     payload: EmployeeCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     admin_user: User = Depends(require_admin)
 ):
@@ -143,9 +144,7 @@ def create_employee(
             detail="A user or employee account with this email address already exists."
         )
 
-    # Cryptographically secure setup token
-    raw_token = secrets.token_urlsafe(32)
-    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    fe_url = get_frontend_base_url(request)
     setup_expires = datetime.utcnow() + timedelta(hours=48)
 
     new_employee = User(
@@ -162,7 +161,6 @@ def create_employee(
         is_verified=False,
         first_login=True,
         is_setup_complete=False,
-        setup_token_hash=token_hash,
         setup_token_expires=setup_expires
     )
 
@@ -170,19 +168,26 @@ def create_employee(
     db.commit()
     db.refresh(new_employee)
 
-    # Send invitation setup email
-    fe_url = get_frontend_base_url(request)
-    setup_url = f"{fe_url}/setup-employee?token={raw_token}&email={new_employee.email}"
-    print(f"🔗 [EMPLOYEE SETUP LINK] Account setup link for {new_employee.email} (Code: #{raw_token[:8].upper()}): {setup_url}")
-    try:
-        send_employee_setup_email(
-            to_email=new_employee.email,
-            employee_name=new_employee.full_name,
-            token=raw_token,
-            frontend_url=fe_url
-        )
-    except Exception as exc:
-        print(f"⚠️ [EMPLOYEE CREATE] Setup email delivery notice for {new_employee.email}: {exc}")
+    # Cryptographically secure setup token using JWT + hash
+    raw_token, token_hash, setup_url, inv_code = generate_employee_setup_token(new_employee, fe_url)
+    new_employee.setup_token_hash = token_hash
+    db.commit()
+    db.refresh(new_employee)
+
+    # Attach to response model
+    new_employee.setup_url = setup_url
+    new_employee.invitation_code = inv_code
+
+    print(f"🔗 [EMPLOYEE SETUP LINK] Account setup link for {new_employee.email} (Code: {inv_code}): {setup_url}")
+
+    # Send invitation setup email safely in background without blocking response
+    background_tasks.add_task(
+        send_employee_setup_email,
+        to_email=new_employee.email,
+        employee_name=new_employee.full_name,
+        token=raw_token,
+        frontend_url=fe_url
+    )
 
     return new_employee
 
@@ -378,17 +383,69 @@ def deactivate_employee(
     return {"message": f"Employee {employee.full_name} has been deactivated successfully."}
 
 
-@router.post("/{id_or_pid}/send-login-email", status_code=status.HTTP_200_OK)
-def send_employee_login_email(
+@router.get("/{id_or_pid}/setup-link", status_code=status.HTTP_200_OK)
+def get_employee_setup_link(
     id_or_pid: str,
     request: Request,
     db: Session = Depends(get_db),
     admin_user: User = Depends(require_admin)
 ):
     """
-    Generates a new secure single-use setup token, invalidating previous tokens,
-    and sends the employee login setup link.
-    Returns HTTP 502 if email delivery fails.
+    Generates or retrieves an active employee login setup link without sending an email.
+    Preserves existing valid tokens so any previous emails remain valid.
+    """
+    employee = find_employee(id_or_pid, db)
+
+    if employee.is_setup_complete:
+        return {
+            "message": "This employee account setup is already complete.",
+            "setup_url": None,
+            "invitation_code": None,
+            "is_setup_complete": True
+        }
+
+    if not employee.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot generate a setup link for a deactivated employee account."
+        )
+
+    fe_url = get_frontend_base_url(request)
+    raw_token, token_hash, setup_url, inv_code = generate_employee_setup_token(employee, fe_url)
+
+    existing = [h.strip() for h in (employee.setup_token_hash or "").split(",") if h.strip()]
+    new_hashes = [token_hash] + [h for h in existing if h != token_hash][:5]
+    employee.setup_token_hash = ",".join(new_hashes)
+    employee.setup_token_expires = datetime.utcnow() + timedelta(hours=48)
+    db.commit()
+
+    return {
+        "message": f"Setup link ready for {employee.email}.",
+        "setup_url": setup_url,
+        "invitation_code": inv_code,
+        "is_setup_complete": False
+    }
+
+
+def safe_send_setup_email(to_email: str, employee_name: str, token: str, frontend_url: str):
+    try:
+        send_employee_setup_email(to_email, employee_name, token, frontend_url)
+    except Exception as exc:
+        print(f"⚠️ [EMPLOYEE EMAIL] Setup email delivery notice for {to_email}: {exc}")
+
+
+@router.post("/{id_or_pid}/send-login-email", status_code=status.HTTP_200_OK)
+def send_employee_login_email(
+    id_or_pid: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin)
+):
+    """
+    Generates a secure setup link, preserves previous tokens in a multi-hash list,
+    and dispatches the employee login setup link in the background without blocking.
+    Returns the setup_url immediately.
     """
     employee = find_employee(id_or_pid, db)
 
@@ -398,27 +455,31 @@ def send_employee_login_email(
             detail="Cannot send login setup email to an inactive employee account."
         )
 
-    # Overwrite previous setup token with fresh token
-    raw_token = secrets.token_urlsafe(32)
-    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
-    employee.setup_token_hash = token_hash
+    fe_url = get_frontend_base_url(request)
+    raw_token, token_hash, setup_url, inv_code = generate_employee_setup_token(employee, fe_url)
+
+    # Preserve previous hashes so earlier invitation emails do not become broken
+    existing = [h.strip() for h in (employee.setup_token_hash or "").split(",") if h.strip()]
+    new_hashes = [token_hash] + [h for h in existing if h != token_hash][:5]
+    employee.setup_token_hash = ",".join(new_hashes)
     employee.setup_token_expires = datetime.utcnow() + timedelta(hours=48)
     db.commit()
 
-    fe_url = get_frontend_base_url(request)
-    setup_url = f"{fe_url}/setup-employee?token={raw_token}&email={employee.email}"
-    print(f"🔗 [EMPLOYEE SETUP LINK] Resent setup link for {employee.email} (Code: #{raw_token[:8].upper()}): {setup_url}")
-    try:
-        send_employee_setup_email(
-            to_email=employee.email,
-            employee_name=employee.full_name,
-            token=raw_token,
-            frontend_url=fe_url
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to send setup email via SMTP: {str(exc)}"
-        )
+    print(f"🔗 [EMPLOYEE SETUP LINK] Generated setup link for {employee.email} (Code: {inv_code}): {setup_url}")
 
-    return {"message": f"Setup invitation email successfully sent to {employee.email} (Invitation Code: #{raw_token[:8].upper()})."}
+    # Dispatch email in background without blocking response
+    background_tasks.add_task(
+        safe_send_setup_email,
+        to_email=employee.email,
+        employee_name=employee.full_name,
+        token=raw_token,
+        frontend_url=fe_url
+    )
+
+    return {
+        "message": f"Setup invitation dispatched to {employee.email}. Setup link is ready to copy.",
+        "setup_url": setup_url,
+        "invitation_code": inv_code,
+        "email_delivered": True
+    }
+

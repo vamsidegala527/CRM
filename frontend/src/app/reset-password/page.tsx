@@ -4,6 +4,8 @@ import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '../../lib/api';
+import { isPasswordValid, PASSWORD_ERROR_MESSAGE } from '../../lib/validation';
+import PasswordInput from '../../components/PasswordInput';
 
 function ResetPasswordForm() {
   const router = useRouter();
@@ -28,6 +30,12 @@ function ResetPasswordForm() {
   const [isSuccess, setIsSuccess] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  const [passwordTouched, setPasswordTouched] = useState(false);
+  const [formSubmitted, setFormSubmitted] = useState(false);
+
+  const isPasswordCriteriaMet = isPasswordValid(newPassword);
+  const showPasswordError = (formSubmitted && !isPasswordCriteriaMet) || (passwordTouched && newPassword.length > 0 && !isPasswordCriteriaMet);
+
   useEffect(() => {
     let cleanToken = '';
     try {
@@ -42,24 +50,14 @@ function ResetPasswordForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setFormSubmitted(true);
 
     if (!token.trim()) {
       setError('Password reset link is missing a valid security token.');
       return;
     }
 
-    if (newPassword.length < 8) {
-      setError('New password must be at least 8 characters.');
-      return;
-    }
-
-    const hasUpper = /[A-Z]/.test(newPassword);
-    const hasLower = /[a-z]/.test(newPassword);
-    const hasDigit = /\d/.test(newPassword);
-    const hasSpecial = /[!@#$%^&*(),.?":{}|<>\-_=+[\]\\/;~`]/.test(newPassword);
-
-    if (!hasUpper || !hasLower || !hasDigit || !hasSpecial) {
-      setError('Password must contain at least 1 uppercase letter, 1 lowercase letter, 1 number, and 1 special character.');
+    if (!isPasswordCriteriaMet) {
       return;
     }
 
@@ -243,92 +241,37 @@ function ResetPasswordForm() {
 
           <div className="form-group">
             <label className="form-label">New Password</label>
-            <input
-              type="password"
-              className="form-control"
+            <PasswordInput
               placeholder="Enter new strong password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
+              onBlur={() => setPasswordTouched(true)}
+              hasError={showPasswordError}
               required
               autoFocus
             />
-            <div style={{ marginTop: '0.45rem', fontSize: '0.75rem' }}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
-                <span style={{
-                  padding: '2px 7px',
-                  borderRadius: '4px',
-                  fontSize: '0.7rem',
-                  background: newPassword.length >= 8 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-                  color: newPassword.length >= 8 ? '#34D399' : 'var(--text-muted)',
-                  border: `1px solid ${newPassword.length >= 8 ? 'rgba(16, 185, 129, 0.4)' : 'var(--border-color)'}`
-                }}>
-                  {newPassword.length >= 8 ? '✓' : '•'} 8+ chars
-                </span>
-                <span style={{
-                  padding: '2px 7px',
-                  borderRadius: '4px',
-                  fontSize: '0.7rem',
-                  background: /[A-Z]/.test(newPassword) ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-                  color: /[A-Z]/.test(newPassword) ? '#34D399' : 'var(--text-muted)',
-                  border: `1px solid ${/[A-Z]/.test(newPassword) ? 'rgba(16, 185, 129, 0.4)' : 'var(--border-color)'}`
-                }}>
-                  {/[A-Z]/.test(newPassword) ? '✓' : '•'} Uppercase
-                </span>
-                <span style={{
-                  padding: '2px 7px',
-                  borderRadius: '4px',
-                  fontSize: '0.7rem',
-                  background: /[a-z]/.test(newPassword) ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-                  color: /[a-z]/.test(newPassword) ? '#34D399' : 'var(--text-muted)',
-                  border: `1px solid ${/[a-z]/.test(newPassword) ? 'rgba(16, 185, 129, 0.4)' : 'var(--border-color)'}`
-                }}>
-                  {/[a-z]/.test(newPassword) ? '✓' : '•'} Lowercase
-                </span>
-                <span style={{
-                  padding: '2px 7px',
-                  borderRadius: '4px',
-                  fontSize: '0.7rem',
-                  background: /\d/.test(newPassword) ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-                  color: /\d/.test(newPassword) ? '#34D399' : 'var(--text-muted)',
-                  border: `1px solid ${/\d/.test(newPassword) ? 'rgba(16, 185, 129, 0.4)' : 'var(--border-color)'}`
-                }}>
-                  {/\d/.test(newPassword) ? '✓' : '•'} Number
-                </span>
-                <span style={{
-                  padding: '2px 7px',
-                  borderRadius: '4px',
-                  fontSize: '0.7rem',
-                  background: /[!@#$%^&*(),.?":{}|<>\-_=+[\]\\/;~`]/.test(newPassword) ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-                  color: /[!@#$%^&*(),.?":{}|<>\-_=+[\]\\/;~`]/.test(newPassword) ? '#34D399' : 'var(--text-muted)',
-                  border: `1px solid ${/[!@#$%^&*(),.?":{}|<>\-_=+[\]\\/;~`]/.test(newPassword) ? 'rgba(16, 185, 129, 0.4)' : 'var(--border-color)'}`
-                }}>
-                  {/[!@#$%^&*(),.?":{}|<>\-_=+[\]\\/;~`]/.test(newPassword) ? '✓' : '•'} Symbol
-                </span>
+            {showPasswordError && (
+              <div
+                style={{
+                  marginTop: '0.45rem',
+                  fontSize: '0.8rem',
+                  color: '#F87171',
+                  lineHeight: 1.4,
+                }}
+              >
+                {PASSWORD_ERROR_MESSAGE}
               </div>
-            </div>
+            )}
           </div>
 
           <div className="form-group">
             <label className="form-label">Confirm New Password</label>
-            <input
-              type="password"
-              className="form-control"
+            <PasswordInput
               placeholder="Re-enter new password to confirm"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               required
             />
-            {confirmPassword && (
-              <small style={{
-                color: confirmPassword === newPassword ? '#34D399' : '#F87171',
-                fontSize: '0.75rem',
-                marginTop: '0.35rem',
-                display: 'block',
-                fontWeight: 600
-              }}>
-                {confirmPassword === newPassword ? '✓ Passwords match' : '✕ Passwords do not match'}
-              </small>
-            )}
           </div>
 
           <button

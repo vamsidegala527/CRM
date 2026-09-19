@@ -10,6 +10,8 @@ interface EmployeeDetailModalProps {
   onEdit: (employee: User) => void;
   onSendEmail?: (employee: User) => void;
   isSendingEmail?: boolean;
+  onCopySetupLink?: (employee: User) => void;
+  isCopyingSetup?: boolean;
 }
 
 export default function EmployeeDetailModal({
@@ -19,6 +21,8 @@ export default function EmployeeDetailModal({
   onEdit,
   onSendEmail,
   isSendingEmail = false,
+  onCopySetupLink,
+  isCopyingSetup = false,
 }: EmployeeDetailModalProps) {
   if (!isOpen || !employee) return null;
 
@@ -202,23 +206,43 @@ export default function EmployeeDetailModal({
             borderTop: '1px solid var(--border-color)',
             flexWrap: 'wrap'
           }}>
-            {onSendEmail && employee.is_active && (
-              <button
-                type="button"
-                onClick={() => onSendEmail(employee)}
-                disabled={isSendingEmail}
-                className="btn"
-                style={{
-                  fontSize: '0.85rem',
-                  padding: '0.45rem 0.9rem',
-                  background: 'rgba(99, 102, 241, 0.15)',
-                  border: '1px solid rgba(99, 102, 241, 0.35)',
-                  color: '#A5B4FC'
-                }}
-              >
-                {isSendingEmail ? 'Sending...' : '✉️ Send Login Email'}
-              </button>
-            )}
+            <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              {!employee.is_setup_complete && employee.is_active && onCopySetupLink && (
+                <button
+                  type="button"
+                  onClick={() => onCopySetupLink(employee)}
+                  disabled={isCopyingSetup}
+                  className="btn"
+                  style={{
+                    fontSize: '0.85rem',
+                    padding: '0.45rem 0.9rem',
+                    background: 'rgba(6, 182, 212, 0.15)',
+                    border: '1px solid rgba(6, 182, 212, 0.35)',
+                    color: '#67E8F9'
+                  }}
+                >
+                  {isCopyingSetup ? 'Copying...' : '🔗 Copy Setup Link'}
+                </button>
+              )}
+
+              {onSendEmail && employee.is_active && (
+                <button
+                  type="button"
+                  onClick={() => onSendEmail(employee)}
+                  disabled={isSendingEmail}
+                  className="btn"
+                  style={{
+                    fontSize: '0.85rem',
+                    padding: '0.45rem 0.9rem',
+                    background: 'rgba(99, 102, 241, 0.15)',
+                    border: '1px solid rgba(99, 102, 241, 0.35)',
+                    color: '#A5B4FC'
+                  }}
+                >
+                  {isSendingEmail ? 'Sending...' : '✉️ Send Login Email'}
+                </button>
+              )}
+            </div>
 
             <div style={{ display: 'flex', gap: '0.75rem', marginLeft: 'auto' }}>
               <button onClick={onClose} className="btn btn-secondary">

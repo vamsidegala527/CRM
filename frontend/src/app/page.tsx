@@ -16,7 +16,9 @@ import EmployeeList from '../components/EmployeeList';
 import EmployeeModal from '../components/EmployeeModal';
 import EmployeeDetailModal from '../components/EmployeeDetailModal';
 import EmployeeDeleteModal from '../components/EmployeeDeleteModal';
+import DeactivateModal from '../components/DeactivateModal';
 import EmployeeSelfService from '../components/EmployeeSelfService';
+import CompanyDetailsModal from '../components/CompanyDetailsModal';
 import ChatbotWidget from '../components/ChatbotWidget';
 
 export default function DashboardPage() {
@@ -33,7 +35,7 @@ export default function DashboardPage() {
   const [verifyTokenInput, setVerifyTokenInput] = useState('');
 
   // Notification state
-  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   // Employee Directory Data & Filter State (Admin)
   const [employees, setEmployees] = useState<User[]>([]);
@@ -64,6 +66,13 @@ export default function DashboardPage() {
 
   const [isEmployeeDeleteOpen, setIsEmployeeDeleteOpen] = useState(false);
   const [selectedEmployeeForDelete, setSelectedEmployeeForDelete] = useState<User | null>(null);
+
+  // Deactivate Modal State
+  const [employeeToDeactivate, setEmployeeToDeactivate] = useState<User | null>(null);
+  const [isDeactivatingEmployee, setIsDeactivatingEmployee] = useState(false);
+
+  // Company Details Modal State
+  const [isCompanyModalOpen, setIsCompanyModalOpen] = useState(false);
 
   // Hydration safety & restore state from sessionStorage
   useEffect(() => {
@@ -97,7 +106,7 @@ export default function DashboardPage() {
     }
   }, [search, accountStatusFilter, setupStatusFilter, page, mounted]);
 
-  const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
+  const showNotification = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 5000);
   };
@@ -298,8 +307,17 @@ export default function DashboardPage() {
         await api.updateEmployee(selectedEmployeeForEdit.id, data as EmployeeUpdateInput);
         showNotification(`Employee "${data.full_name}" updated successfully.`);
       } else {
-        await api.createEmployee(data as EmployeeCreateInput);
-        showNotification(`Employee "${data.full_name}" created and onboarding invitation dispatched!`);
+        const newEmp = await api.createEmployee(data as EmployeeCreateInput);
+        if (newEmp.setup_url && typeof navigator !== 'undefined' && navigator.clipboard) {
+          try {
+            await navigator.clipboard.writeText(newEmp.setup_url);
+          } catch (_) {}
+        }
+        showNotification(
+          newEmp.setup_url
+            ? `Employee "${data.full_name}" created & setup link copied to clipboard!`
+            : `Employee "${data.full_name}" created and onboarding invitation dispatched!`
+        );
       }
       setIsEmployeeModalOpen(false);
       fetchEmployees();
@@ -311,11 +329,41 @@ export default function DashboardPage() {
     }
   };
 
+  const [copyingSetupId, setCopyingSetupId] = useState<number | null>(null);
+
+  const handleCopySetupLink = async (emp: User) => {
+    setCopyingSetupId(emp.id);
+    try {
+      const res = await api.getEmployeeSetupLink(emp.id);
+      if (res.setup_url) {
+        if (typeof navigator !== 'undefined' && navigator.clipboard) {
+          await navigator.clipboard.writeText(res.setup_url);
+        }
+        showNotification(`✓ Setup link for ${emp.full_name} copied to clipboard!`);
+      } else {
+        showNotification(res.message || 'Setup link is not available.', 'info');
+      }
+    } catch (err: any) {
+      showNotification(err.message || 'Failed to generate setup link.', 'error');
+    } finally {
+      setCopyingSetupId(null);
+    }
+  };
+
   const handleSendLoginEmail = async (emp: User) => {
     setSendingEmailId(emp.id);
     try {
       const res = await api.sendEmployeeLoginEmail(emp.id);
-      showNotification(res.message || `Setup login email successfully sent to ${emp.email}!`);
+      if (res.setup_url && typeof navigator !== 'undefined' && navigator.clipboard) {
+        try {
+          await navigator.clipboard.writeText(res.setup_url);
+        } catch (_) {}
+      }
+      if (res.email_delivered === false) {
+        showNotification(res.message || `Setup link copied to clipboard! (Email delivery unavailable on host).`, 'info');
+      } else {
+        showNotification(res.message || `Setup login email sent and link copied to clipboard!`);
+      }
       fetchEmployees();
       fetchEmployeeMetrics();
     } catch (err: any) {
@@ -325,15 +373,22 @@ export default function DashboardPage() {
     }
   };
 
-  const handleDeactivateEmployee = async (emp: User) => {
-    if (!confirm(`Are you sure you want to deactivate ${emp.full_name}? Their active sessions will be revoked.`)) return;
+  const handleDeactivateEmployee = (emp: User) => {
+    setEmployeeToDeactivate(emp);
+  };
+
+  const handleConfirmDeactivateEmployee = async (emp: User) => {
+    setIsDeactivatingEmployee(true);
     try {
       const res = await api.deactivateEmployee(emp.id, false, false);
       showNotification(res.message || `${emp.full_name} deactivated.`);
+      setEmployeeToDeactivate(null);
       fetchEmployees();
       fetchEmployeeMetrics();
     } catch (err: any) {
       showNotification(err.message || 'Failed to deactivate employee.', 'error');
+    } finally {
+      setIsDeactivatingEmployee(false);
     }
   };
 
@@ -511,9 +566,9 @@ export default function DashboardPage() {
         {/* Global Notification Banner */}
         {notification && (
           <div style={{
-            background: notification.type === 'success' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)',
-            border: `1px solid ${notification.type === 'success' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(244, 63, 94, 0.3)'}`,
-            color: notification.type === 'success' ? '#34D399' : '#F87171',
+            background: notification.type === 'success' ? 'rgba(16, 185, 129, 0.15)' : notification.type === 'info' ? 'rgba(99, 102, 241, 0.15)' : 'rgba(244, 63, 94, 0.15)',
+            border: `1px solid ${notification.type === 'success' ? 'rgba(16, 185, 129, 0.3)' : notification.type === 'info' ? 'rgba(99, 102, 241, 0.3)' : 'rgba(244, 63, 94, 0.3)'}`,
+            color: notification.type === 'success' ? '#34D399' : notification.type === 'info' ? '#A5B4FC' : '#F87171',
             padding: '0.85rem 1.25rem',
             borderRadius: 'var(--radius-sm)',
             marginBottom: '1.5rem',
@@ -539,6 +594,7 @@ export default function DashboardPage() {
               setStoredUser(u);
             }}
             showNotification={showNotification}
+            onViewCompany={() => setIsCompanyModalOpen(true)}
           />
         ) : (
           /* ROLE 2: HR/ADMIN PORTAL DASHBOARD */
@@ -570,22 +626,39 @@ export default function DashboardPage() {
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={handleOpenAddEmployee}
-                className="btn btn-primary"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  padding: '0.65rem 1.25rem',
-                  fontWeight: 600,
-                  fontSize: '0.92rem',
-                  boxShadow: '0 4px 14px rgba(99, 102, 241, 0.35)'
-                }}
-              >
-                <span>➕</span> Add Employee
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => setIsCompanyModalOpen(true)}
+                  className="btn btn-secondary"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.65rem 1.25rem',
+                    fontWeight: 600,
+                    fontSize: '0.92rem',
+                  }}
+                >
+                  <span>🏢</span> Company Profile
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenAddEmployee}
+                  className="btn btn-primary"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.65rem 1.25rem',
+                    fontWeight: 600,
+                    fontSize: '0.92rem',
+                    boxShadow: '0 4px 14px rgba(99, 102, 241, 0.35)'
+                  }}
+                >
+                  <span>➕</span> Add Employee
+                </button>
+              </div>
             </div>
 
             {/* 5 KPI Metric Cards (Calculated independently from search, filters, and pagination) */}
@@ -767,6 +840,8 @@ export default function DashboardPage() {
               onDelete={handleOpenDeleteEmployee}
               onSendEmail={handleSendLoginEmail}
               sendingEmailId={sendingEmailId}
+              onCopySetupLink={handleCopySetupLink}
+              copyingSetupId={copyingSetupId}
             />
 
             {/* Pagination Controls */}
@@ -963,6 +1038,8 @@ export default function DashboardPage() {
               }}
               onSendEmail={handleSendLoginEmail}
               isSendingEmail={sendingEmailId === selectedEmployeeForDetail?.id}
+              onCopySetupLink={handleCopySetupLink}
+              isCopyingSetup={copyingSetupId === selectedEmployeeForDetail?.id}
             />
 
             <EmployeeDeleteModal
@@ -971,15 +1048,42 @@ export default function DashboardPage() {
               employee={selectedEmployeeForDelete}
               onConfirm={handleConfirmDeleteEmployee}
             />
+
+            <DeactivateModal
+              isOpen={!!employeeToDeactivate}
+              onClose={() => {
+                if (!isDeactivatingEmployee) {
+                  setEmployeeToDeactivate(null);
+                }
+              }}
+              employee={employeeToDeactivate}
+              onConfirm={handleConfirmDeactivateEmployee}
+              isProcessing={isDeactivatingEmployee}
+            />
           </>
         )}
       </main>
 
+      {/* Company Details Modal */}
+      <CompanyDetailsModal
+        isOpen={isCompanyModalOpen}
+        onClose={() => setIsCompanyModalOpen(false)}
+        isAdmin={currentUser?.role === 'admin'}
+        showNotification={showNotification}
+      />
+
       {/* Nexus AI Chatbot Assistant */}
       <ChatbotWidget
+        user={currentUser}
         onEmployeeChange={() => {
-          fetchEmployees();
-          fetchEmployeeMetrics();
+          if (currentUser?.role === 'admin') {
+            fetchEmployees();
+            fetchEmployeeMetrics();
+          }
+        }}
+        onProfileUpdate={(updatedUser) => {
+          setCurrentUser(updatedUser);
+          setStoredUser(updatedUser);
         }}
       />
     </div>

@@ -174,6 +174,8 @@ class UserResponse(UserBase):
     created_at: datetime
     google_id: Optional[str] = None
     auth_provider: Optional[str] = "email"
+    setup_url: Optional[str] = None
+    invitation_code: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
     @field_validator("full_name", mode="before")
@@ -348,3 +350,101 @@ class ChangePasswordRequest(BaseModel):
         return self
 
 
+# ---------------------------------------------------------------------------
+# Company Details Schemas
+# ---------------------------------------------------------------------------
+
+class CompanyDetailsResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: Optional[int] = None
+
+    # Identity & Branding
+    company_name: Optional[str] = None
+    tagline: Optional[str] = None
+    logo_url: Optional[str] = None
+    industry: Optional[str] = None
+    company_type: Optional[str] = None
+    founded_year: Optional[int] = None
+    company_size: Optional[str] = None
+    registration_number: Optional[str] = None
+
+    # Location & Contact
+    headquarters_address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
+    postal_code: Optional[str] = None
+    phone: Optional[str] = None
+    fax: Optional[str] = None
+    contact_email: Optional[str] = None
+    support_email: Optional[str] = None
+
+    # Online Presence
+    website_url: Optional[str] = None
+    careers_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    twitter_url: Optional[str] = None
+    instagram_url: Optional[str] = None
+    facebook_url: Optional[str] = None
+
+    # About & Culture
+    about: Optional[str] = None
+    mission: Optional[str] = None
+    vision: Optional[str] = None
+    core_values: Optional[str] = None
+    culture_description: Optional[str] = None
+
+    # Business Details
+    annual_revenue: Optional[str] = None
+    products_services: Optional[str] = None
+    key_clients: Optional[str] = None
+    certifications: Optional[str] = None
+    awards: Optional[str] = None
+
+    updated_at: Optional[datetime] = None
+
+
+class CompanyDetailsUpdate(BaseModel):
+    # Identity & Branding
+    company_name: Optional[str] = None
+    tagline: Optional[str] = None
+    logo_url: Optional[str] = None
+    industry: Optional[str] = None
+    company_type: Optional[str] = None
+    founded_year: Optional[int] = None
+    company_size: Optional[str] = None
+    registration_number: Optional[str] = None
+
+    # Location & Contact
+    headquarters_address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
+    postal_code: Optional[str] = None
+    phone: Optional[str] = None
+    fax: Optional[str] = None
+    contact_email: Optional[str] = None
+    support_email: Optional[str] = None
+
+    # Online Presence
+    website_url: Optional[str] = None
+    careers_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    twitter_url: Optional[str] = None
+    instagram_url: Optional[str] = None
+    facebook_url: Optional[str] = None
+
+    # About & Culture
+    about: Optional[str] = None
+    mission: Optional[str] = None
+    vision: Optional[str] = None
+    core_values: Optional[str] = None
+    culture_description: Optional[str] = None
+
+    # Business Details
+    annual_revenue: Optional[str] = None
+    products_services: Optional[str] = None
+    key_clients: Optional[str] = None
+    certifications: Optional[str] = None
+    awards: Optional[str] = None

@@ -3,17 +3,21 @@
 import React, { useState } from 'react';
 import { User } from '../types/employee';
 import { api, setStoredUser } from '../lib/api';
+import { isPasswordValid, PASSWORD_ERROR_MESSAGE } from '../lib/validation';
+import PasswordInput from './PasswordInput';
 
 interface EmployeeSelfServiceProps {
   user: User;
   onUserUpdate: (updatedUser: User) => void;
   showNotification: (msg: string, type?: 'success' | 'error') => void;
+  onViewCompany?: () => void;
 }
 
 export default function EmployeeSelfService({
   user,
   onUserUpdate,
-  showNotification
+  showNotification,
+  onViewCompany,
 }: EmployeeSelfServiceProps) {
   // Profile update state
   const [fullName, setFullName] = useState(user.full_name || '');
@@ -26,17 +30,13 @@ export default function EmployeeSelfService({
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
 
-  // Password complexity checks
-  const hasMinLength = newPassword.length >= 8;
-  const hasUppercase = /[A-Z]/.test(newPassword);
-  const hasLowercase = /[a-z]/.test(newPassword);
-  const hasNumber = /\d/.test(newPassword);
-  const hasSpecial = /[!@#$%^&*(),.?":{}|<>\-_=+[\]\\/;~`]/.test(newPassword);
-  const passwordsMatch = newPassword && confirmPassword && newPassword === confirmPassword;
-  const isPasswordValid = hasMinLength && hasUppercase && hasLowercase && hasNumber && hasSpecial && passwordsMatch;
+  const [passwordTouched, setPasswordTouched] = useState(false);
+  const [formSubmitted, setFormSubmitted] = useState(false);
+
+  const isPasswordCriteriaMet = isPasswordValid(newPassword);
+  const showPasswordError = (formSubmitted && !isPasswordCriteriaMet) || (passwordTouched && newPassword.length > 0 && !isPasswordCriteriaMet);
 
   const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -66,13 +66,24 @@ export default function EmployeeSelfService({
 
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormSubmitted(true);
+
     if (!currentPassword) {
       showNotification('Please enter your current password.', 'error');
       return;
     }
 
-    if (!isPasswordValid) {
-      showNotification('Please make sure your new password meets all complexity requirements.', 'error');
+    if (!isPasswordCriteriaMet) {
+      return;
+    }
+
+    if (!confirmPassword) {
+      showNotification('Please confirm your new password.', 'error');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      showNotification('New passwords do not match.', 'error');
       return;
     }
 
@@ -148,6 +159,32 @@ export default function EmployeeSelfService({
             </p>
           </div>
         </div>
+        {/* Our Company Quick Action */}
+        {onViewCompany && (
+          <button
+            type="button"
+            onClick={onViewCompany}
+            style={{
+              background: 'rgba(99,102,241,0.12)',
+              border: '1px solid rgba(99,102,241,0.3)',
+              borderRadius: '12px',
+              padding: '0.65rem 1.2rem',
+              color: '#A5B4FC',
+              fontSize: '0.85rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.45rem',
+              transition: 'all 0.2s',
+              whiteSpace: 'nowrap',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(99,102,241,0.22)'; e.currentTarget.style.borderColor = 'rgba(99,102,241,0.5)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(99,102,241,0.12)'; e.currentTarget.style.borderColor = 'rgba(99,102,241,0.3)'; }}
+          >
+            🏢 Our Company
+          </button>
+        )}
       </div>
 
       {/* Two Column Grid: Profile on left, Password on right */}
@@ -256,9 +293,7 @@ export default function EmployeeSelfService({
               <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.35rem' }}>
                 Current Password *
               </label>
-              <input
-                type={showPassword ? 'text' : 'password'}
-                className="form-control"
+              <PasswordInput
                 value={currentPassword}
                 onChange={(e) => setCurrentPassword(e.target.value)}
                 required
@@ -267,35 +302,36 @@ export default function EmployeeSelfService({
             </div>
 
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)' }}>
-                  New Password *
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  style={{ background: 'none', border: 'none', color: '#818CF8', fontSize: '0.75rem', cursor: 'pointer', fontWeight: 600 }}
-                >
-                  {showPassword ? 'Hide' : 'Show'}
-                </button>
-              </div>
-              <input
-                type={showPassword ? 'text' : 'password'}
-                className="form-control"
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.35rem' }}>
+                New Password *
+              </label>
+              <PasswordInput
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
+                onBlur={() => setPasswordTouched(true)}
+                hasError={showPasswordError}
                 required
                 placeholder="Choose strong new password"
               />
+              {showPasswordError && (
+                <div
+                  style={{
+                    marginTop: '0.45rem',
+                    fontSize: '0.8rem',
+                    color: '#F87171',
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {PASSWORD_ERROR_MESSAGE}
+                </div>
+              )}
             </div>
 
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.35rem' }}>
                 Confirm New Password *
               </label>
-              <input
-                type={showPassword ? 'text' : 'password'}
-                className="form-control"
+              <PasswordInput
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 required
@@ -303,41 +339,10 @@ export default function EmployeeSelfService({
               />
             </div>
 
-            {/* Checklist */}
-            <div style={{
-              background: 'rgba(0, 0, 0, 0.25)',
-              border: '1px solid var(--border-color)',
-              borderRadius: '8px',
-              padding: '0.65rem 0.85rem',
-              fontSize: '0.75rem',
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: '0.35rem'
-            }}>
-              <span style={{ color: hasMinLength ? '#34D399' : '#64748B' }}>
-                {hasMinLength ? '✓' : '○'} 8+ characters
-              </span>
-              <span style={{ color: hasUppercase ? '#34D399' : '#64748B' }}>
-                {hasUppercase ? '✓' : '○'} Uppercase
-              </span>
-              <span style={{ color: hasLowercase ? '#34D399' : '#64748B' }}>
-                {hasLowercase ? '✓' : '○'} Lowercase
-              </span>
-              <span style={{ color: hasNumber ? '#34D399' : '#64748B' }}>
-                {hasNumber ? '✓' : '○'} Number (0-9)
-              </span>
-              <span style={{ color: hasSpecial ? '#34D399' : '#64748B' }}>
-                {hasSpecial ? '✓' : '○'} Special symbol
-              </span>
-              <span style={{ color: passwordsMatch ? '#34D399' : '#64748B' }}>
-                {passwordsMatch ? '✓' : '○'} Passwords match
-              </span>
-            </div>
-
             <button
               type="submit"
               className="btn btn-primary"
-              disabled={isChangingPassword || !isPasswordValid}
+              disabled={isChangingPassword}
               style={{ marginTop: '0.5rem' }}
             >
               {isChangingPassword ? 'Updating Password...' : 'Update Password'}

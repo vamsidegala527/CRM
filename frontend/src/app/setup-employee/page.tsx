@@ -4,6 +4,8 @@ import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '../../lib/api';
+import { isPasswordValid, PASSWORD_ERROR_MESSAGE } from '../../lib/validation';
+import PasswordInput from '../../components/PasswordInput';
 
 function SetupEmployeeContent() {
   const router = useRouter();
@@ -13,38 +15,42 @@ function SetupEmployeeContent() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
   useEffect(() => {
-    const urlToken = (searchParams.get('token') || '').trim();
-    const urlEmail = (searchParams.get('email') || '').trim();
-    setToken(urlToken);
-    setEmail(urlEmail);
+    const rawToken = searchParams.get('token') || '';
+    const rawEmail = searchParams.get('email') || '';
+    let decodedToken = rawToken.trim();
+    let decodedEmail = rawEmail.trim();
 
-    if (!urlToken) {
-      setError('Invalid or missing setup link. Please click the link in your invitation email.');
+    try {
+      if (decodedToken.includes('%')) decodedToken = decodeURIComponent(decodedToken);
+      if (decodedEmail.includes('%')) decodedEmail = decodeURIComponent(decodedEmail);
+    } catch (_) {}
+
+    setToken(decodedToken);
+    setEmail(decodedEmail);
+
+    if (!decodedToken) {
+      setError('Invalid or missing setup link. Please click the link in your invitation email or contact your administrator for an active setup link.');
     }
   }, [searchParams]);
 
-  // Password complexity checks
-  const hasMinLength = password.length >= 8;
-  const hasUppercase = /[A-Z]/.test(password);
-  const hasLowercase = /[a-z]/.test(password);
-  const hasNumber = /\d/.test(password);
-  const hasSpecial = /[!@#$%^&*(),.?":{}|<>\-_=+[\]\\/;~`]/.test(password);
-  const passwordsMatch = password && confirmPassword && password === confirmPassword;
-  const isFormValid = hasMinLength && hasUppercase && hasLowercase && hasNumber && hasSpecial && passwordsMatch;
+  const [passwordTouched, setPasswordTouched] = useState(false);
+  const [formSubmitted, setFormSubmitted] = useState(false);
 
-  const invCode = token ? token.slice(0, 8).toUpperCase() : null;
+  const isPasswordCriteriaMet = isPasswordValid(password);
+  const showPasswordError = (formSubmitted && !isPasswordCriteriaMet) || (passwordTouched && password.length > 0 && !isPasswordCriteriaMet);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccess(null);
+
+    setFormSubmitted(true);
 
     const cleanToken = token.trim();
     const cleanEmail = email.trim();
@@ -59,13 +65,17 @@ function SetupEmployeeContent() {
       return;
     }
 
-    if (password !== confirmPassword) {
-      setError('Passwords do not match. Please verify your new password.');
+    if (!isPasswordCriteriaMet) {
       return;
     }
 
-    if (!isFormValid) {
-      setError('Please ensure your password meets all complexity requirements below.');
+    if (!confirmPassword) {
+      setError('Please confirm your new password.');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError('Passwords do not match. Please verify your new password.');
       return;
     }
 
@@ -130,24 +140,9 @@ function SetupEmployeeContent() {
           <h1 style={{ fontSize: '1.65rem', fontWeight: 800, color: '#FFFFFF', margin: '0 0 0.5rem', letterSpacing: '-0.02em' }}>
             Set Up Your Account
           </h1>
-          <p style={{ fontSize: '0.875rem', color: '#94A3B8', margin: '0 0 0.75rem' }}>
+          <p style={{ fontSize: '0.875rem', color: '#94A3B8', margin: 0 }}>
             Choose a secure password to activate your employee portal access.
           </p>
-          {invCode && (
-            <div style={{
-              display: 'inline-block',
-              background: 'rgba(99, 102, 241, 0.15)',
-              border: '1px solid rgba(99, 102, 241, 0.35)',
-              color: '#A5B4FC',
-              fontFamily: 'monospace',
-              fontSize: '0.8rem',
-              padding: '0.25rem 0.75rem',
-              borderRadius: '9999px',
-              fontWeight: 600
-            }}>
-              Invitation Code: #{invCode}
-            </div>
-          )}
         </div>
 
         {/* Feedback Alerts */}
@@ -186,7 +181,7 @@ function SetupEmployeeContent() {
               </div>
             ) : (
               <div style={{ fontSize: '0.8rem', color: '#CBD5E1', borderTop: '1px solid rgba(239, 68, 68, 0.2)', paddingTop: '0.5rem', marginTop: '0.5rem' }}>
-                💡 <strong>Tip:</strong> If you received multiple invitation emails, open your inbox and click the link in the <em>most recent</em> email (check the Invitation Code in the subject).
+                💡 <strong>Tip:</strong> If you received multiple invitation emails, click the link in your newest email. Or ask your administrator to click <strong>"Copy Setup Link" (🔗)</strong> in the HR Portal to give you an active link directly.
               </div>
             )}
           </div>
@@ -239,42 +234,36 @@ function SetupEmployeeContent() {
 
           {/* New Password */}
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-              <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#CBD5E1' }}>
-                New Password
-              </label>
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#818CF8',
-                  fontSize: '0.75rem',
-                  cursor: 'pointer',
-                  fontWeight: 600
-                }}
-              >
-                {showPassword ? 'Hide' : 'Show'}
-              </button>
-            </div>
-            <input
-              type={showPassword ? 'text' : 'password'}
+            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#CBD5E1', marginBottom: '0.4rem' }}>
+              New Password
+            </label>
+            <PasswordInput
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              onBlur={() => setPasswordTouched(true)}
               required
               placeholder="Choose a strong password"
+              hasError={showPasswordError}
               style={{
-                width: '100%',
-                padding: '0.75rem 1rem',
                 background: 'rgba(255, 255, 255, 0.06)',
-                border: '1px solid rgba(255, 255, 255, 0.12)',
                 borderRadius: '10px',
                 color: '#FFFFFF',
                 fontSize: '0.9rem',
-                outline: 'none'
+                outline: 'none',
               }}
             />
+            {showPasswordError && (
+              <div
+                style={{
+                  marginTop: '0.45rem',
+                  fontSize: '0.8rem',
+                  color: '#F87171',
+                  lineHeight: 1.4,
+                }}
+              >
+                {PASSWORD_ERROR_MESSAGE}
+              </div>
+            )}
           </div>
 
           {/* Confirm Password */}
@@ -282,77 +271,40 @@ function SetupEmployeeContent() {
             <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#CBD5E1', marginBottom: '0.4rem' }}>
               Confirm Password
             </label>
-            <input
-              type={showPassword ? 'text' : 'password'}
+            <PasswordInput
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               required
               placeholder="Re-enter your new password"
               style={{
-                width: '100%',
-                padding: '0.75rem 1rem',
                 background: 'rgba(255, 255, 255, 0.06)',
-                border: '1px solid rgba(255, 255, 255, 0.12)',
                 borderRadius: '10px',
                 color: '#FFFFFF',
                 fontSize: '0.9rem',
-                outline: 'none'
+                outline: 'none',
               }}
             />
-          </div>
-
-          {/* Password Complexity checklist */}
-          <div style={{
-            background: 'rgba(0, 0, 0, 0.25)',
-            border: '1px solid rgba(255, 255, 255, 0.06)',
-            borderRadius: '10px',
-            padding: '0.75rem 1rem',
-            fontSize: '0.75rem',
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap: '0.4rem'
-          }}>
-            <span style={{ color: hasMinLength ? '#34D399' : '#64748B' }}>
-              {hasMinLength ? '✓' : '○'} At least 8 characters
-            </span>
-            <span style={{ color: hasUppercase ? '#34D399' : '#64748B' }}>
-              {hasUppercase ? '✓' : '○'} One uppercase letter
-            </span>
-            <span style={{ color: hasLowercase ? '#34D399' : '#64748B' }}>
-              {hasLowercase ? '✓' : '○'} One lowercase letter
-            </span>
-            <span style={{ color: hasNumber ? '#34D399' : '#64748B' }}>
-              {hasNumber ? '✓' : '○'} One number (0-9)
-            </span>
-            <span style={{ color: hasSpecial ? '#34D399' : '#64748B' }}>
-              {hasSpecial ? '✓' : '○'} One special character
-            </span>
-            <span style={{ color: passwordsMatch ? '#34D399' : '#64748B' }}>
-              {passwordsMatch ? '✓' : '○'} Passwords match
-            </span>
           </div>
 
           {/* Submit Button */}
           <button
             type="submit"
-            disabled={loading || !isFormValid}
+            disabled={loading}
             style={{
               marginTop: '0.5rem',
               padding: '0.85rem',
-              background: isFormValid
-                ? 'linear-gradient(135deg, #6366F1 0%, #4F46E5 100%)'
-                : 'rgba(255, 255, 255, 0.1)',
-              color: isFormValid ? '#FFFFFF' : '#64748B',
+              background: 'linear-gradient(135deg, #6366F1 0%, #4F46E5 100%)',
+              color: '#FFFFFF',
               border: 'none',
               borderRadius: '10px',
               fontSize: '0.95rem',
               fontWeight: 700,
-              cursor: isFormValid && !loading ? 'pointer' : 'not-allowed',
-              boxShadow: isFormValid ? '0 4px 14px rgba(99, 102, 241, 0.35)' : 'none',
-              transition: 'all 0.2s ease'
+              cursor: loading ? 'not-allowed' : 'pointer',
+              transition: 'all 0.2s ease',
+              boxShadow: '0 4px 12px rgba(99, 102, 241, 0.3)'
             }}
           >
-            {loading ? 'Activating Account...' : 'Complete Account Setup'}
+            {loading ? 'Setting up account...' : 'Complete Account Setup'}
           </button>
         </form>
 

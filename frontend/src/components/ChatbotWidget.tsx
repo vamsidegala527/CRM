@@ -1,15 +1,18 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useChat } from '@ai-sdk/react';
-import { getAuthToken } from '../lib/api';
+import { api, getAuthToken } from '../lib/api';
+import { User } from '../types/employee';
 
 interface ChatbotWidgetProps {
+  user?: User | null;
   onEmployeeChange?: () => void;
+  onProfileUpdate?: (updatedUser: User) => void;
 }
 
-// Initial quick action prompts for empty state
-const STARTER_CATEGORIES = [
+// Initial quick action prompts for HR/Admin empty state
+const ADMIN_STARTER_CATEGORIES = [
   {
     category: 'Directory & Search',
     items: [
@@ -35,13 +38,49 @@ const STARTER_CATEGORIES = [
   },
 ];
 
-// Quick action chips bar above input
-const QUICK_BAR_PROMPTS = [
+// Initial quick action prompts for Employee Self-Service empty state
+const EMPLOYEE_STARTER_CATEGORIES = [
+  {
+    category: 'My Profile & Information',
+    items: [
+      { icon: '👤', label: 'View my full profile', prompt: 'Show my full employee profile details' },
+      { icon: '🏢', label: 'My department & title', prompt: 'What department and job title am I assigned to?' },
+      { icon: '📊', label: 'Account onboarding status', prompt: 'Check my account setup and onboarding status' },
+    ],
+  },
+  {
+    category: 'Update Contact Details',
+    items: [
+      { icon: '📞', label: 'Update my phone number', prompt: 'Help me update my contact phone number' },
+      { icon: '📍', label: 'Update my address', prompt: 'Help me update my residential or work address' },
+      { icon: '✏️', label: 'Update profile information', prompt: 'I want to update my profile details' },
+    ],
+  },
+  {
+    category: 'Security & Portal Help',
+    items: [
+      { icon: '🔒', label: 'How to change password', prompt: 'How do I change my account password?' },
+      { icon: '💡', label: 'Self-service features', prompt: 'What actions and self-service features can I use in the portal?' },
+    ],
+  },
+];
+
+// Quick action chips bar above input (Admin)
+const ADMIN_QUICK_BAR_PROMPTS = [
   { icon: '👥', label: 'Directory', prompt: 'Show all employees' },
   { icon: '➕', label: 'Add Employee', prompt: 'I want to add a new employee' },
   { icon: '⚡', label: 'Active', prompt: 'Show active employees' },
   { icon: '⏳', label: 'Pending', prompt: 'Show employees with setup pending' },
   { icon: '📊', label: 'HR Metrics', prompt: 'Give me a summary of all employee metrics' },
+];
+
+// Quick action chips bar above input (Employee)
+const EMPLOYEE_QUICK_BAR_PROMPTS = [
+  { icon: '👤', label: 'My Profile', prompt: 'Show my employee profile details' },
+  { icon: '📞', label: 'Update Phone', prompt: 'I want to update my phone number' },
+  { icon: '📍', label: 'Update Address', prompt: 'I want to update my address' },
+  { icon: '🏢', label: 'Department', prompt: 'What department and title am I assigned to?' },
+  { icon: '🔒', label: 'Password Help', prompt: 'How do I change my password?' },
 ];
 
 /**
@@ -601,11 +640,20 @@ function EmployeeResultCard({
   );
 }
 
-export default function ChatbotWidget({ onEmployeeChange }: ChatbotWidgetProps) {
+export default function ChatbotWidget({ user, onEmployeeChange, onProfileUpdate }: ChatbotWidgetProps) {
+  const isEmployee = user?.role === 'employee';
+  const userRole = user?.role || 'guest';
+  const userId = user?.id ?? 'anon';
+  const chatHistoryKey = `hr_chat_history_${userRole}_${userId}`;
+  const widgetStateKey = `hr_chat_widget_state_${userId}`;
+
+  const starterCategories = isEmployee ? EMPLOYEE_STARTER_CATEGORIES : ADMIN_STARTER_CATEGORIES;
+  const quickBarPrompts = isEmployee ? EMPLOYEE_QUICK_BAR_PROMPTS : ADMIN_QUICK_BAR_PROMPTS;
+
   const [isOpen, setIsIsOpen] = useState(() => {
     if (typeof window !== 'undefined') {
       try {
-        const state = JSON.parse(localStorage.getItem('hr_chat_widget_state') || localStorage.getItem('crm_chat_widget_state') || '{}');
+        const state = JSON.parse(localStorage.getItem(widgetStateKey) || localStorage.getItem('hr_chat_widget_state') || '{}');
         if (typeof state.isOpen === 'boolean') return state.isOpen;
       } catch (e) {}
     }
@@ -614,7 +662,7 @@ export default function ChatbotWidget({ onEmployeeChange }: ChatbotWidgetProps) 
   const [isMinimized, setIsMinimized] = useState(() => {
     if (typeof window !== 'undefined') {
       try {
-        const state = JSON.parse(localStorage.getItem('crm_chat_widget_state') || '{}');
+        const state = JSON.parse(localStorage.getItem(widgetStateKey) || '{}');
         if (typeof state.isMinimized === 'boolean') return state.isMinimized;
       } catch (e) {}
     }
@@ -623,7 +671,7 @@ export default function ChatbotWidget({ onEmployeeChange }: ChatbotWidgetProps) 
   const [isExpanded, setIsExpanded] = useState(() => {
     if (typeof window !== 'undefined') {
       try {
-        const state = JSON.parse(localStorage.getItem('crm_chat_widget_state') || '{}');
+        const state = JSON.parse(localStorage.getItem(widgetStateKey) || '{}');
         if (typeof state.isExpanded === 'boolean') return state.isExpanded;
       } catch (e) {}
     }
@@ -655,13 +703,16 @@ export default function ChatbotWidget({ onEmployeeChange }: ChatbotWidgetProps) 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const quickBarRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
 
   const chat: any = useChat({
     api: '/api/chat',
     initialMessages: (() => {
       if (typeof window !== 'undefined') {
         try {
-          const saved = localStorage.getItem('crm_chat_history');
+          const saved = localStorage.getItem(chatHistoryKey);
           if (saved) {
             const parsed = JSON.parse(saved);
             if (Array.isArray(parsed)) return parsed;
@@ -686,6 +737,11 @@ export default function ChatbotWidget({ onEmployeeChange }: ChatbotWidgetProps) 
       if (onEmployeeChange) {
         onEmployeeChange();
       }
+      if (isEmployee && onProfileUpdate) {
+        api.getCurrentUser().then((u) => {
+          onProfileUpdate(u);
+        }).catch(() => {});
+      }
     },
   } as any);
 
@@ -703,38 +759,40 @@ export default function ChatbotWidget({ onEmployeeChange }: ChatbotWidgetProps) 
     if (typeof window !== 'undefined') {
       try {
         localStorage.setItem(
-          'crm_chat_widget_state',
+          widgetStateKey,
           JSON.stringify({ isOpen, isMinimized, isExpanded })
         );
       } catch (e) {}
     }
-  }, [isOpen, isMinimized, isExpanded]);
+  }, [isOpen, isMinimized, isExpanded, widgetStateKey]);
 
-  // Fallback hydration for messages if initialMessages didn't populate
+  // Hydration for messages when user/chatHistoryKey changes
   useEffect(() => {
     if (typeof window !== 'undefined') {
       try {
-        const saved = localStorage.getItem('crm_chat_history');
+        const saved = localStorage.getItem(chatHistoryKey);
         if (saved) {
           const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0 && messages.length === 0) {
+          if (Array.isArray(parsed)) {
             setMessages(parsed);
           }
+        } else {
+          setMessages([]);
         }
       } catch (e) {}
     }
-  }, []);
+  }, [chatHistoryKey]);
 
   // Save chat conversation history to localStorage on update
   useEffect(() => {
     if (typeof window !== 'undefined' && messages && messages.length > 0) {
       try {
-        localStorage.setItem('crm_chat_history', JSON.stringify(messages));
+        localStorage.setItem(chatHistoryKey, JSON.stringify(messages));
       } catch (e) {
         console.error('Failed to save chat history', e);
       }
     }
-  }, [messages]);
+  }, [messages, chatHistoryKey]);
 
   const isLoading = status === 'submitted' || status === 'streaming' || chat.isLoading;
 
@@ -777,6 +835,33 @@ export default function ChatbotWidget({ onEmployeeChange }: ChatbotWidgetProps) 
     }
   }, [isOpen, isMinimized]);
 
+  const checkQuickBarScroll = useCallback(() => {
+    const el = quickBarRef.current;
+    if (!el) return;
+    const { scrollLeft, scrollWidth, clientWidth } = el;
+    setCanScrollLeft(scrollLeft > 4);
+    setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 4);
+  }, []);
+
+  useEffect(() => {
+    checkQuickBarScroll();
+    const timer = setTimeout(checkQuickBarScroll, 100);
+    const handleResize = () => checkQuickBarScroll();
+    window.addEventListener('resize', handleResize);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [messages, isOpen, isExpanded, checkQuickBarScroll]);
+
+  const scrollQuickBar = (direction: 'left' | 'right') => {
+    const el = quickBarRef.current;
+    if (!el) return;
+    const scrollAmount = direction === 'left' ? -150 : 150;
+    el.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+    setTimeout(checkQuickBarScroll, 250);
+  };
+
   const handleSuggestedClick = (prompt: string) => {
     append({
       role: 'user',
@@ -788,6 +873,7 @@ export default function ChatbotWidget({ onEmployeeChange }: ChatbotWidgetProps) 
     setMessages([]);
     setShowClearConfirm(false);
     if (typeof window !== 'undefined') {
+      localStorage.removeItem(chatHistoryKey);
       localStorage.removeItem('crm_chat_history');
     }
   };
@@ -951,9 +1037,29 @@ export default function ChatbotWidget({ onEmployeeChange }: ChatbotWidgetProps) 
                 ✨
               </div>
               <div>
-                <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#F8FAFC', margin: 0, letterSpacing: '-0.01em' }}>
-                  Nexus AI
-                </h3>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#F8FAFC', margin: 0, letterSpacing: '-0.01em' }}>
+                    Nexus AI
+                  </h3>
+                  <span
+                    style={{
+                      fontSize: '0.625rem',
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                      padding: '0.12rem 0.45rem',
+                      borderRadius: '6px',
+                      background: isEmployee ? 'rgba(16, 185, 129, 0.2)' : 'rgba(99, 102, 241, 0.2)',
+                      color: isEmployee ? '#34D399' : '#A5B4FC',
+                      border: `1px solid ${isEmployee ? 'rgba(16, 185, 129, 0.35)' : 'rgba(99, 102, 241, 0.35)'}`,
+                    }}
+                  >
+                    {isEmployee ? 'Employee' : 'HR/Admin'}
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.7rem', color: '#94A3B8', marginTop: '0.1rem' }}>
+                  {isEmployee ? 'Self-Service Assistant' : 'HR & Directory Operations'}
+                </div>
               </div>
             </div>
 
@@ -1097,12 +1203,14 @@ export default function ChatbotWidget({ onEmployeeChange }: ChatbotWidgetProps) 
                       How can I help you today?
                     </h4>
                     <p style={{ fontSize: '0.825rem', color: '#94A3B8', margin: '0 auto 1.4rem', maxWidth: '360px', lineHeight: 1.5 }}>
-                      Manage your workforce directory naturally with AI. Ask questions, view staff, search departments, or get instant HR insights.
+                      {isEmployee
+                        ? 'Your personal AI Self-Service Assistant. View or update your contact profile, review your department information, or get help with your account.'
+                        : 'Manage your workforce directory naturally with AI. Ask questions, view staff, search departments, or get instant HR insights.'}
                     </p>
 
                     {/* Categorized Starters */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem', textAlign: 'left' }}>
-                      {STARTER_CATEGORIES.map((cat, catIdx) => (
+                      {starterCategories.map((cat, catIdx) => (
                         <div key={catIdx} style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                           <span
                             style={{
@@ -1591,54 +1699,182 @@ export default function ChatbotWidget({ onEmployeeChange }: ChatbotWidgetProps) 
                 </button>
               )}
 
-              {/* Quick Actions Scroll Bar (active during conversation) */}
+              {/* Quick Actions Slide Bar (active during conversation) */}
               {messages.length > 0 && (
                 <div
                   style={{
+                    position: 'relative',
+                    background: 'rgba(15, 23, 42, 0.9)',
+                    borderTop: '1px solid rgba(255, 255, 255, 0.06)',
                     display: 'flex',
-                    gap: '0.45rem',
-                    padding: '0.45rem 0.9rem',
-                    background: 'rgba(15, 23, 42, 0.85)',
-                    borderTop: '1px solid rgba(255, 255, 255, 0.05)',
-                    overflowX: 'auto',
-                    whiteSpace: 'nowrap',
-                    scrollbarWidth: 'none',
+                    alignItems: 'center',
+                    minHeight: '38px',
                   }}
                 >
-                  {QUICK_BAR_PROMPTS.map((q, qIdx) => (
+                  {/* Left Slide Arrow */}
+                  {canScrollLeft && (
                     <button
-                      key={qIdx}
                       type="button"
-                      onClick={() => handleSuggestedClick(q.prompt)}
+                      onClick={() => scrollQuickBar('left')}
+                      title="Slide left"
+                      aria-label="Previous quick actions"
                       style={{
-                        background: 'rgba(255, 255, 255, 0.04)',
-                        border: '1px solid rgba(255, 255, 255, 0.08)',
-                        borderRadius: '999px',
-                        padding: '0.25rem 0.65rem',
-                        color: '#94A3B8',
-                        fontSize: '0.725rem',
-                        fontWeight: 600,
-                        cursor: 'pointer',
+                        position: 'absolute',
+                        left: '4px',
+                        zIndex: 4,
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '50%',
+                        background: 'rgba(30, 41, 59, 0.95)',
+                        border: '1px solid rgba(99, 102, 241, 0.4)',
+                        color: '#C7D2FE',
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '0.3rem',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.6)',
+                        fontSize: '0.65rem',
                         transition: 'all 0.15s ease',
                       }}
                       onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'rgba(99, 102, 241, 0.35)';
                         e.currentTarget.style.color = '#FFFFFF';
-                        e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.4)';
-                        e.currentTarget.style.background = 'rgba(99, 102, 241, 0.15)';
+                        e.currentTarget.style.transform = 'scale(1.08)';
                       }}
                       onMouseLeave={(e) => {
-                        e.currentTarget.style.color = '#94A3B8';
-                        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
-                        e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)';
+                        e.currentTarget.style.background = 'rgba(30, 41, 59, 0.95)';
+                        e.currentTarget.style.color = '#C7D2FE';
+                        e.currentTarget.style.transform = 'scale(1)';
                       }}
                     >
-                      <span>{q.icon}</span>
-                      <span>{q.label}</span>
+                      &#9664;
                     </button>
-                  ))}
+                  )}
+
+                  {/* Left Fade Gradient */}
+                  {canScrollLeft && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: 0,
+                        top: 0,
+                        bottom: 0,
+                        width: '32px',
+                        background: 'linear-gradient(to right, rgba(15, 23, 42, 0.95), transparent)',
+                        pointerEvents: 'none',
+                        zIndex: 2,
+                      }}
+                    />
+                  )}
+
+                  {/* Scrollable Container */}
+                  <div
+                    ref={quickBarRef}
+                    onScroll={checkQuickBarScroll}
+                    style={{
+                      display: 'flex',
+                      gap: '0.45rem',
+                      padding: '0.45rem 0.9rem',
+                      overflowX: 'auto',
+                      whiteSpace: 'nowrap',
+                      scrollbarWidth: 'none',
+                      msOverflowStyle: 'none',
+                      width: '100%',
+                      scrollBehavior: 'smooth',
+                    }}
+                  >
+                    {quickBarPrompts.map((q, qIdx) => (
+                      <button
+                        key={qIdx}
+                        type="button"
+                        onClick={() => handleSuggestedClick(q.prompt)}
+                        style={{
+                          background: 'rgba(255, 255, 255, 0.04)',
+                          border: '1px solid rgba(255, 255, 255, 0.08)',
+                          borderRadius: '999px',
+                          padding: '0.25rem 0.65rem',
+                          color: '#94A3B8',
+                          fontSize: '0.725rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.3rem',
+                          flexShrink: 0,
+                          transition: 'all 0.15s ease',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.color = '#FFFFFF';
+                          e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.4)';
+                          e.currentTarget.style.background = 'rgba(99, 102, 241, 0.15)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.color = '#94A3B8';
+                          e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)';
+                        }}
+                      >
+                        <span>{q.icon}</span>
+                        <span>{q.label}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Right Fade Gradient */}
+                  {canScrollRight && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        right: 0,
+                        top: 0,
+                        bottom: 0,
+                        width: '32px',
+                        background: 'linear-gradient(to left, rgba(15, 23, 42, 0.95), transparent)',
+                        pointerEvents: 'none',
+                        zIndex: 2,
+                      }}
+                    />
+                  )}
+
+                  {/* Right Slide Arrow */}
+                  {canScrollRight && (
+                    <button
+                      type="button"
+                      onClick={() => scrollQuickBar('right')}
+                      title="Slide right"
+                      aria-label="Next quick actions"
+                      style={{
+                        position: 'absolute',
+                        right: '4px',
+                        zIndex: 4,
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '50%',
+                        background: 'rgba(30, 41, 59, 0.95)',
+                        border: '1px solid rgba(99, 102, 241, 0.4)',
+                        color: '#C7D2FE',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.6)',
+                        fontSize: '0.65rem',
+                        transition: 'all 0.15s ease',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'rgba(99, 102, 241, 0.35)';
+                        e.currentTarget.style.color = '#FFFFFF';
+                        e.currentTarget.style.transform = 'scale(1.08)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'rgba(30, 41, 59, 0.95)';
+                        e.currentTarget.style.color = '#C7D2FE';
+                        e.currentTarget.style.transform = 'scale(1)';
+                      }}
+                    >
+                      &#9654;
+                    </button>
+                  )}
                 </div>
               )}
 

@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base, sync_db_schema
 from app.config import settings
-from app.routers import auth, employees
+from app.routers import auth, employees, company
 
 try:
     Base.metadata.create_all(bind=engine)
@@ -82,6 +82,7 @@ app.add_middleware(
 # Register API Routers
 app.include_router(auth.router)
 app.include_router(employees.router)
+app.include_router(company.router)
 
 @app.get("/")
 def read_root():

@@ -2,6 +2,9 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
+from app.database import get_db
+from app.models import User
+from app.auth import get_password_hash
 
 client = TestClient(app)
 
@@ -24,8 +27,8 @@ def admin_headers():
 
 @pytest.fixture(scope="module")
 def employee_headers(admin_headers):
-    # Admin onboards an employee
     unique_email = f"emp_cb_{uuid.uuid4().hex[:8]}@example.com"
+    pwd = "EmpSecurePassword123!"
     res = client.post("/api/employees", headers=admin_headers, json={
         "email": unique_email,
         "full_name": "Employee CB",
@@ -33,7 +36,25 @@ def employee_headers(admin_headers):
         "department": "Support"
     })
     assert res.status_code == 201
-    return None
+    emp_id = res.json()["id"]
+
+    db = next(get_db())
+    try:
+        u = db.query(User).filter(User.id == emp_id).first()
+        u.hashed_password = get_password_hash(pwd)
+        u.is_setup_complete = True
+        u.is_verified = True
+        db.commit()
+    finally:
+        db.close()
+
+    login_res = client.post("/api/auth/login", json={
+        "email": unique_email,
+        "password": pwd
+    })
+    assert login_res.status_code == 200
+    token = login_res.json()["access_token"]
+    return {"Authorization": f"Bearer {token}", "email": unique_email, "id": emp_id}
 
 
 def test_chatbot_unauthenticated_request_rejected():
@@ -119,3 +140,50 @@ def test_chatbot_validation_handling(admin_headers):
         "phone": "1234567890"
     })
     assert res.status_code == 422
+
+
+def test_chatbot_employee_can_get_own_profile(employee_headers):
+    res = client.get("/api/employees/me", headers={"Authorization": employee_headers["Authorization"]})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["email"] == employee_headers["email"]
+    assert data["role"] == "employee"
+
+
+def test_chatbot_employee_can_update_own_profile(employee_headers):
+    res = client.put("/api/employees/me", headers={"Authorization": employee_headers["Authorization"]}, json={
+        "phone": "+1 (555) 777-8888",
+        "department": "Support Team Alpha"
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert data["phone"] == "+1 (555) 777-8888"
+    assert data["department"] == "Support Team Alpha"
+
+
+def test_chatbot_employee_strictly_forbidden_from_admin_directory(employee_headers):
+    # 1. Directory listing is 403
+    res_list = client.get("/api/employees", headers={"Authorization": employee_headers["Authorization"]})
+    assert res_list.status_code == 403
+
+    # 2. Directory metrics is 403
+    res_metrics = client.get("/api/employees/metrics", headers={"Authorization": employee_headers["Authorization"]})
+    assert res_metrics.status_code == 403
+
+    # 3. Employee creation is 403
+    res_create = client.post("/api/employees", headers={"Authorization": employee_headers["Authorization"]}, json={
+        "email": "hacker@example.com",
+        "full_name": "Hacker Impostor"
+    })
+    assert res_create.status_code == 403
+
+
+def test_chatbot_auth_me_returns_isolated_role(admin_headers, employee_headers):
+    admin_me = client.get("/api/auth/me", headers={"Authorization": admin_headers["Authorization"]})
+    assert admin_me.status_code == 200
+    assert admin_me.json()["role"] == "admin"
+
+    emp_me = client.get("/api/auth/me", headers={"Authorization": employee_headers["Authorization"]})
+    assert emp_me.status_code == 200
+    assert emp_me.json()["role"] == "employee"
+

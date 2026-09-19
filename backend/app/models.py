@@ -39,3 +39,56 @@ class User(Base):
     reset_password_expires = Column(DateTime, nullable=True)
     token_revoked_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class CompanyDetails(Base):
+    """Single-row table storing company profile information.
+    Only one record (id=1) is ever created; admin upserts it."""
+    __tablename__ = "company_details"
+
+    id = Column(Integer, primary_key=True, default=1)
+
+    # --- Identity & Branding ---
+    company_name = Column(String, nullable=True)
+    tagline = Column(String, nullable=True)
+    logo_url = Column(String, nullable=True)
+    industry = Column(String, nullable=True)
+    company_type = Column(String, nullable=True)   # Private | Public | Non-profit | Startup
+    founded_year = Column(Integer, nullable=True)
+    company_size = Column(String, nullable=True)   # e.g. "50-200"
+    registration_number = Column(String, nullable=True)
+
+    # --- Location & Contact ---
+    headquarters_address = Column(Text, nullable=True)
+    city = Column(String, nullable=True)
+    state = Column(String, nullable=True)
+    country = Column(String, nullable=True)
+    postal_code = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    fax = Column(String, nullable=True)
+    contact_email = Column(String, nullable=True)
+    support_email = Column(String, nullable=True)
+
+    # --- Online Presence ---
+    website_url = Column(String, nullable=True)
+    careers_url = Column(String, nullable=True)
+    linkedin_url = Column(String, nullable=True)
+    twitter_url = Column(String, nullable=True)
+    instagram_url = Column(String, nullable=True)
+    facebook_url = Column(String, nullable=True)
+
+    # --- About & Culture ---
+    about = Column(Text, nullable=True)
+    mission = Column(Text, nullable=True)
+    vision = Column(Text, nullable=True)
+    core_values = Column(Text, nullable=True)
+    culture_description = Column(Text, nullable=True)
+
+    # --- Business Details ---
+    annual_revenue = Column(String, nullable=True)
+    products_services = Column(Text, nullable=True)
+    key_clients = Column(Text, nullable=True)
+    certifications = Column(Text, nullable=True)
+    awards = Column(Text, nullable=True)
+
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)

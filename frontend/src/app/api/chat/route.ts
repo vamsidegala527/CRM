@@ -162,6 +162,33 @@ export async function POST(req: Request) {
       }
     };
 
+    // 1. Fetch current authenticated user to enforce strict RBAC
+    let currentUser: any = null;
+    try {
+      currentUser = await fetchBackend('/api/auth/me');
+    } catch (err: any) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized session or authentication token expired. Please sign in again.' }),
+        { status: 401, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const userRole = (currentUser?.role || 'employee').toLowerCase();
+    const isEmployee = userRole === 'employee';
+    const userName = currentUser?.full_name || 'User';
+
+    // -------------------------------------------------------------
+    // Schemas
+    // -------------------------------------------------------------
+    // Employee Self-Service Schema
+    const updateMyProfileSchema = z.object({
+      full_name: z.string().optional().describe('Updated full name'),
+      department: z.string().optional().describe('Updated department'),
+      phone: z.string().optional().describe('Updated contact phone number'),
+      address: z.string().optional().describe('Updated office or residential address'),
+    });
+
+    // Admin Schemas
     const getEmployeesSchema = z.object({
       search: z.string().optional().describe('Search keyword matching full name, email, department, job title, phone, company, or public ID'),
       account_status: z.enum(['All', 'Active', 'Inactive']).optional().describe('Filter by account status: All, Active, or Inactive'),
@@ -209,13 +236,240 @@ export async function POST(req: Request) {
       employeeName: z.string().describe('Name of the employee'),
     });
 
-    const maxOutputTokens = process.env.AI_MAX_OUTPUT_TOKENS ? Number(process.env.AI_MAX_OUTPUT_TOKENS) : 600;
+    // -------------------------------------------------------------
+    // Tools Definition (Strictly Isolated by Role)
+    // -------------------------------------------------------------
+    const employeeTools: Record<string, any> = {
+      getMyProfile: tool({
+        description: 'Retrieve the current logged-in employee\'s own profile details (full name, email, department, job title, phone, address, account status, and join date).',
+        inputSchema: z.object({}),
+        parameters: z.object({}),
+        execute: async () => {
+          try {
+            return await fetchBackend('/api/employees/me');
+          } catch (err: any) {
+            return { error: err.message || 'Failed to retrieve your profile.' };
+          }
+        },
+      } as any),
 
-    const result = streamText({
-      model: modelInstance,
-      maxOutputTokens,
-      system: `You are Nexus AI, an intelligent, friendly, and proactive HR Assistant embedded in the HR & Employee Management Portal.
-You have direct tool access to live employee directory data and administrative actions for authorized HR/Admin users. Help administrators manage personnel rosters, onboarding statuses, and access permissions safely and effectively.
+      updateMyProfile: tool({
+        description: 'Update the current logged-in employee\'s own contact details (full name, department, phone number, address).',
+        inputSchema: updateMyProfileSchema,
+        parameters: updateMyProfileSchema,
+        execute: async (updateFields: any) => {
+          try {
+            const res = await fetchBackend('/api/employees/me', {
+              method: 'PUT',
+              body: JSON.stringify(updateFields),
+            });
+            return {
+              success: true,
+              message: 'Your profile has been updated successfully.',
+              updated_profile: res,
+            };
+          } catch (err: any) {
+            return { error: err.message || 'Failed to update your profile.' };
+          }
+        },
+      } as any),
+    };
+
+    const adminTools: Record<string, any> = {
+      getEmployees: tool({
+        description: 'Fetch, search, filter, or count employees in the directory.',
+        inputSchema: getEmployeesSchema,
+        parameters: getEmployeesSchema,
+        execute: async ({ search, account_status, setup_status, skip, limit }: any) => {
+          try {
+            const query = new URLSearchParams();
+            if (search) query.append('search', search);
+            if (account_status && account_status !== 'All') query.append('account_status', account_status);
+            if (setup_status && setup_status !== 'All') query.append('setup_status', setup_status);
+            query.append('skip', String(skip || 0));
+            query.append('limit', String(limit || 20));
+            return await fetchBackend(`/api/employees?${query.toString()}`);
+          } catch (err: any) {
+            return { error: err.message || 'Failed to retrieve employees.' };
+          }
+        },
+      } as any),
+
+      getEmployeeMetrics: tool({
+        description: 'Retrieve real-time organizational KPIs: Total Employees, Active Staff, Inactive Staff, Setup Pending, Setup Completed.',
+        inputSchema: z.object({}),
+        parameters: z.object({}),
+        execute: async () => {
+          try {
+            return await fetchBackend('/api/employees/metrics');
+          } catch (err: any) {
+            return { error: err.message || 'Failed to retrieve employee metrics.' };
+          }
+        },
+      } as any),
+
+      getEmployee: tool({
+        description: 'Get a specific employee profile by numeric ID or public ID.',
+        inputSchema: getEmployeeSchema,
+        parameters: getEmployeeSchema,
+        execute: async ({ employeeId }: any) => {
+          try {
+            return await fetchBackend(`/api/employees/${employeeId}`);
+          } catch (err: any) {
+            return { error: err.message || `Employee #${employeeId} not found.` };
+          }
+        },
+      } as any),
+
+      createEmployee: tool({
+        description: 'Create a new employee record and trigger their account setup invitation.',
+        inputSchema: createEmployeeSchema,
+        parameters: createEmployeeSchema,
+        execute: async (employeeData: any) => {
+          try {
+            return await fetchBackend('/api/employees', {
+              method: 'POST',
+              body: JSON.stringify(employeeData),
+            });
+          } catch (err: any) {
+            return { error: err.message || 'Failed to create employee.' };
+          }
+        },
+      } as any),
+
+      updateEmployee: tool({
+        description: 'Update an existing employee profile by ID.',
+        inputSchema: updateEmployeeSchema,
+        parameters: updateEmployeeSchema,
+        execute: async ({ employeeId, ...updateFields }: any) => {
+          try {
+            return await fetchBackend(`/api/employees/${employeeId}`, {
+              method: 'PUT',
+              body: JSON.stringify(updateFields),
+            });
+          } catch (err: any) {
+            return { error: err.message || `Failed to update employee #${employeeId}.` };
+          }
+        },
+      } as any),
+
+      deactivateEmployee: tool({
+        description: 'Deactivate an employee (soft-delete), revoking their active sessions while keeping records intact.',
+        inputSchema: z.object({
+          employeeId: z.union([z.number(), z.string()]).describe('Employee ID or public ID'),
+          employeeName: z.string().describe('Name of the employee'),
+        }),
+        parameters: z.object({
+          employeeId: z.union([z.number(), z.string()]),
+          employeeName: z.string(),
+        }),
+        execute: async ({ employeeId, employeeName }: any) => {
+          try {
+            const res = await fetchBackend(`/api/employees/${employeeId}?permanent=false`, {
+              method: 'DELETE',
+            });
+            return {
+              success: true,
+              employeeId,
+              employeeName,
+              message: res.message || `Employee "${employeeName}" deactivated successfully.`,
+            };
+          } catch (err: any) {
+            return { error: err.message || `Failed to deactivate employee #${employeeId}.` };
+          }
+        },
+      } as any),
+
+      reactivateEmployee: tool({
+        description: 'Reactivate an inactive employee account so they can log in again.',
+        inputSchema: reactivateEmployeeSchema,
+        parameters: reactivateEmployeeSchema,
+        execute: async ({ employeeId, employeeName }: any) => {
+          try {
+            const res = await fetchBackend(`/api/employees/${employeeId}/reactivate`, {
+              method: 'POST',
+            });
+            return {
+              success: true,
+              employeeId,
+              employeeName,
+              message: `Employee "${employeeName}" reactivated successfully.`,
+              employee: res,
+            };
+          } catch (err: any) {
+            return { error: err.message || `Failed to reactivate employee #${employeeId}.` };
+          }
+        },
+      } as any),
+
+      deleteEmployee: tool({
+        description: 'Permanently delete an employee record from the database. Requires explicit confirmation.',
+        inputSchema: deleteEmployeeSchema,
+        parameters: deleteEmployeeSchema,
+        execute: async ({ employeeId, employeeName, permanent, confirmed }: any) => {
+          if (permanent && !confirmed) {
+            return {
+              requiresConfirmation: true,
+              employeeId,
+              employeeName,
+              permanent: true,
+              message: `Are you sure you want to permanently delete employee "${employeeName}" (ID #${employeeId})? This action is irreversible and removes all employee data.`,
+            };
+          }
+          try {
+            const query = new URLSearchParams();
+            if (permanent) {
+              query.append('permanent', 'true');
+              query.append('confirmed', 'true');
+            }
+            const res = await fetchBackend(`/api/employees/${employeeId}?${query.toString()}`, {
+              method: 'DELETE',
+            });
+            return {
+              success: true,
+              employeeId,
+              employeeName,
+              permanent: Boolean(permanent),
+              message: res.message || `Employee "${employeeName}" ${permanent ? 'permanently deleted' : 'deactivated'} successfully.`,
+            };
+          } catch (err: any) {
+            return { error: err.message || `Failed to delete employee #${employeeId}.` };
+          }
+        },
+      } as any),
+    };
+
+    // -------------------------------------------------------------
+    // System Prompts (Tailored by Role)
+    // -------------------------------------------------------------
+    const employeeSystemPrompt = `You are Nexus AI, an intelligent, helpful, and courteous Employee Self-Service Assistant for ${userName} (Email: ${currentUser?.email || 'N/A'}).
+You assist this specific employee in navigating their employee portal, checking and updating their personal profile details, and providing self-service guidance.
+
+ROLE & STRICT ACCESS CONTROL:
+- You are strictly operating under the "Employee" role for ${userName}.
+- You can ONLY view or update the current employee's OWN profile via getMyProfile and updateMyProfile.
+- You do NOT have access to company-wide employee rosters, other colleagues' personal records, administrative HR metrics, or management operations.
+- STRICT PRIVACY & PERMISSION DENIAL: If the user asks to list employees, search other colleagues, view company metrics, add/create employees, deactivate accounts, or delete records, you MUST politely refuse and state:
+  "As an Employee, you only have access to your personal self-service profile and details. Accessing other employee records or company-wide HR metrics requires HR/Admin privileges."
+
+CAPABILITIES:
+- View current employee's profile, contact details, department, job title, and onboarding status (getMyProfile)
+- Update current employee's personal contact info: full name, department, phone number, and address (updateMyProfile)
+- Provide step-by-step guidance on changing password via the Change Password card in the portal
+- Answer questions about portal navigation and self-service features
+
+CONVERSATION & RESPONSE GUIDELINES:
+1. WARM & PROFESSIONAL TONE:
+   - Greet ${userName} warmly and keep responses concise, clear, and well-structured.
+   - Use clean markdown, bolding, and bullet points.
+2. SMART PROFILE UPDATES:
+   - When updating contact details, confirm the updated fields back to the user clearly.
+3. CONTEXT-AWARE SMART SUGGESTIONS:
+   - At the VERY END of your response, append 2 to 3 contextual follow-up suggestions on a new line in this EXACT format:
+     [SUGGESTIONS: "View My Profile", "Update Contact Details", "Change Password Help"]`;
+
+    const adminSystemPrompt = `You are Nexus AI, an intelligent, friendly, and proactive HR Assistant embedded in the HR & Employee Management Portal.
+You have direct tool access to live employee directory data and administrative actions for authorized HR/Admin users (${userName}). Help administrators manage personnel rosters, onboarding statuses, and access permissions safely and effectively.
 
 ROLE & ACCESS CONTROL RULES:
 - Employee directory management (viewing, listing, creating, updating, deactivating, reactivating, and permanently deleting employees) is strictly restricted to HR/Admin accounts.
@@ -248,175 +502,20 @@ CONVERSATION & RESPONSE GUIDELINES:
    - At the VERY END of your response, append 2 to 4 contextual follow-up suggestions on a new line in this EXACT format:
      [SUGGESTIONS: "Option 1", "Option 2", "Option 3"]
 5. DATA SECURITY & ACCURACY:
-   - All backend API calls enforce authentication and RBAC data isolation. Never invent fake employee records.`,
+   - All backend API calls enforce authentication and RBAC data isolation. Never invent fake employee records.`;
+
+    const maxOutputTokens = process.env.AI_MAX_OUTPUT_TOKENS ? Number(process.env.AI_MAX_OUTPUT_TOKENS) : 600;
+
+    const result = streamText({
+      model: modelInstance,
+      maxOutputTokens,
+      system: isEmployee ? employeeSystemPrompt : adminSystemPrompt,
       messages,
       stopWhen: stepCountIs(5),
       onError: (error: any) => {
         console.error('[streamText Execution Error]:', error);
       },
-      tools: {
-        getEmployees: tool({
-          description: 'Fetch, search, filter, or count employees in the directory.',
-          inputSchema: getEmployeesSchema,
-          parameters: getEmployeesSchema,
-          execute: async ({ search, account_status, setup_status, skip, limit }: any) => {
-            try {
-              const query = new URLSearchParams();
-              if (search) query.append('search', search);
-              if (account_status && account_status !== 'All') query.append('account_status', account_status);
-              if (setup_status && setup_status !== 'All') query.append('setup_status', setup_status);
-              query.append('skip', String(skip || 0));
-              query.append('limit', String(limit || 20));
-              return await fetchBackend(`/api/employees?${query.toString()}`);
-            } catch (err: any) {
-              return { error: err.message || 'Failed to retrieve employees.' };
-            }
-          },
-        } as any),
-
-        getEmployeeMetrics: tool({
-          description: 'Retrieve real-time organizational KPIs: Total Employees, Active Staff, Inactive Staff, Setup Pending, Setup Completed.',
-          inputSchema: z.object({}),
-          parameters: z.object({}),
-          execute: async () => {
-            try {
-              return await fetchBackend('/api/employees/metrics');
-            } catch (err: any) {
-              return { error: err.message || 'Failed to retrieve employee metrics.' };
-            }
-          },
-        } as any),
-
-        getEmployee: tool({
-          description: 'Get a specific employee profile by numeric ID or public ID.',
-          inputSchema: getEmployeeSchema,
-          parameters: getEmployeeSchema,
-          execute: async ({ employeeId }: any) => {
-            try {
-              return await fetchBackend(`/api/employees/${employeeId}`);
-            } catch (err: any) {
-              return { error: err.message || `Employee #${employeeId} not found.` };
-            }
-          },
-        } as any),
-
-        createEmployee: tool({
-          description: 'Create a new employee record and trigger their account setup invitation.',
-          inputSchema: createEmployeeSchema,
-          parameters: createEmployeeSchema,
-          execute: async (employeeData: any) => {
-            try {
-              return await fetchBackend('/api/employees', {
-                method: 'POST',
-                body: JSON.stringify(employeeData),
-              });
-            } catch (err: any) {
-              return { error: err.message || 'Failed to create employee.' };
-            }
-          },
-        } as any),
-
-        updateEmployee: tool({
-          description: 'Update an existing employee profile by ID.',
-          inputSchema: updateEmployeeSchema,
-          parameters: updateEmployeeSchema,
-          execute: async ({ employeeId, ...updateFields }: any) => {
-            try {
-              return await fetchBackend(`/api/employees/${employeeId}`, {
-                method: 'PUT',
-                body: JSON.stringify(updateFields),
-              });
-            } catch (err: any) {
-              return { error: err.message || `Failed to update employee #${employeeId}.` };
-            }
-          },
-        } as any),
-
-        deactivateEmployee: tool({
-          description: 'Deactivate an employee (soft-delete), revoking their active sessions while keeping records intact.',
-          inputSchema: z.object({
-            employeeId: z.union([z.number(), z.string()]).describe('Employee ID or public ID'),
-            employeeName: z.string().describe('Name of the employee'),
-          }),
-          parameters: z.object({
-            employeeId: z.union([z.number(), z.string()]),
-            employeeName: z.string(),
-          }),
-          execute: async ({ employeeId, employeeName }: any) => {
-            try {
-              const res = await fetchBackend(`/api/employees/${employeeId}?permanent=false`, {
-                method: 'DELETE',
-              });
-              return {
-                success: true,
-                employeeId,
-                employeeName,
-                message: res.message || `Employee "${employeeName}" deactivated successfully.`,
-              };
-            } catch (err: any) {
-              return { error: err.message || `Failed to deactivate employee #${employeeId}.` };
-            }
-          },
-        } as any),
-
-        reactivateEmployee: tool({
-          description: 'Reactivate an inactive employee account so they can log in again.',
-          inputSchema: reactivateEmployeeSchema,
-          parameters: reactivateEmployeeSchema,
-          execute: async ({ employeeId, employeeName }: any) => {
-            try {
-              const res = await fetchBackend(`/api/employees/${employeeId}/reactivate`, {
-                method: 'POST',
-              });
-              return {
-                success: true,
-                employeeId,
-                employeeName,
-                message: `Employee "${employeeName}" reactivated successfully.`,
-                employee: res,
-              };
-            } catch (err: any) {
-              return { error: err.message || `Failed to reactivate employee #${employeeId}.` };
-            }
-          },
-        } as any),
-
-        deleteEmployee: tool({
-          description: 'Permanently delete an employee record from the database. Requires explicit confirmation.',
-          inputSchema: deleteEmployeeSchema,
-          parameters: deleteEmployeeSchema,
-          execute: async ({ employeeId, employeeName, permanent, confirmed }: any) => {
-            if (permanent && !confirmed) {
-              return {
-                requiresConfirmation: true,
-                employeeId,
-                employeeName,
-                permanent: true,
-                message: `Are you sure you want to permanently delete employee "${employeeName}" (ID #${employeeId})? This action is irreversible and removes all employee data.`,
-              };
-            }
-            try {
-              const query = new URLSearchParams();
-              if (permanent) {
-                query.append('permanent', 'true');
-                query.append('confirmed', 'true');
-              }
-              const res = await fetchBackend(`/api/employees/${employeeId}?${query.toString()}`, {
-                method: 'DELETE',
-              });
-              return {
-                success: true,
-                employeeId,
-                employeeName,
-                permanent: Boolean(permanent),
-                message: res.message || `Employee "${employeeName}" ${permanent ? 'permanently deleted' : 'deactivated'} successfully.`,
-              };
-            } catch (err: any) {
-              return { error: err.message || `Failed to delete employee #${employeeId}.` };
-            }
-          },
-        } as any),
-      } as any,
+      tools: isEmployee ? employeeTools : adminTools,
     } as any);
 
     const formatStreamError = (error: any) => {

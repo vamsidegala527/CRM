@@ -22,7 +22,10 @@ from app.schemas import (
     EmployeeSetupRequest, ChangePasswordRequest
 )
 from typing import Optional
-from app.auth import verify_password, get_password_hash, create_access_token, get_current_user, oauth2_scheme
+from app.auth import (
+    verify_password, get_password_hash, create_access_token,
+    get_current_user, oauth2_scheme, verify_employee_setup_token
+)
 from app.config import settings
 from app.rate_limiter import limiter, get_client_ip
 from app.email_service import send_verification_email, send_password_reset_email, EmailDeliveryError
@@ -529,7 +532,7 @@ def setup_employee_account(
 ):
     """
     Public employee onboarding endpoint:
-    - Finds the employee by cryptographically hashing the single-use token and comparing against setup_token_hash.
+    - Finds the employee by cryptographically verifying the setup token (JWT, exact sha256 hash, or multi-hash list).
     - Validates link expiration and email match.
     - Sets password, sets is_setup_complete=True, and invalidates the token.
     """
@@ -537,15 +540,16 @@ def setup_employee_account(
     limiter.check_rate_limit(f"setup_ip:{client_ip}", max_requests=10, window_seconds=300, action="employee setup attempt")
 
     token_raw = payload.token.strip()
-    token_hash = hashlib.sha256(token_raw.encode("utf-8")).hexdigest()
+    submitted_email = payload.email.strip().lower()
 
-    user = db.query(User).filter(User.setup_token_hash == token_hash).first()
+    # Multi-layered token verification (JWT signature, exact hash, comma-separated list)
+    user = verify_employee_setup_token(token_raw, submitted_email, db)
 
     if not user:
         # Check by email for diagnostic logging and precise user feedback
-        user_by_email = db.query(User).filter(func.lower(func.trim(User.email)) == payload.email.strip().lower()).first()
+        user_by_email = db.query(User).filter(func.lower(func.trim(User.email)) == submitted_email).first()
         if user_by_email:
-            print(f"⚠️ [SETUP REJECTED] Email: {payload.email} | User ID: {user_by_email.id} | Setup complete: {user_by_email.is_setup_complete} | Active: {user_by_email.is_active} | DB Token Hash: {user_by_email.setup_token_hash[:10] if user_by_email.setup_token_hash else 'None'} | Submitted Token Hash: {token_hash[:10]}")
+            print(f"⚠️ [SETUP REJECTED] Email: {submitted_email} | User ID: {user_by_email.id} | Setup complete: {user_by_email.is_setup_complete} | Active: {user_by_email.is_active}")
             if user_by_email.is_setup_complete:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -556,23 +560,28 @@ def setup_employee_account(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="This employee account is currently deactivated. Please contact your HR administrator."
                 )
+            if user_by_email.setup_token_expires and user_by_email.setup_token_expires < datetime.utcnow():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="This employee setup link has expired. Please contact your administrator to click 'Copy Setup Link' in the HR Portal."
+                )
         else:
-            print(f"⚠️ [SETUP REJECTED] No employee account found with email {payload.email} or token hash {token_hash[:10]}")
+            print(f"⚠️ [SETUP REJECTED] No employee account found with email {submitted_email}")
 
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or unrecognized setup link. If you received multiple emails, please use the latest link, or ask your administrator to send a new setup email."
+            detail="Invalid or unrecognized setup link. If you received multiple emails, please use the latest link, or ask your administrator to click 'Copy Setup Link' in the HR Portal to give you an active link."
         )
 
     if user.setup_token_expires and user.setup_token_expires < datetime.utcnow():
         print(f"⚠️ [SETUP REJECTED] Setup link for {user.email} expired at {user.setup_token_expires}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This employee setup link has expired. Please contact your administrator to request a new invitation email."
+            detail="This employee setup link has expired. Please contact your administrator to request a new invitation email or link."
         )
 
-    if user.email.strip().lower() != payload.email.strip().lower():
-        print(f"⚠️ [SETUP REJECTED] Email mismatch: token owner is {user.email}, but submitted email is {payload.email}")
+    if user.email.strip().lower() != submitted_email:
+        print(f"⚠️ [SETUP REJECTED] Email mismatch: token owner is {user.email}, but submitted email is {submitted_email}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email address does not match the employee account invitation."

@@ -13,6 +13,8 @@ interface EmployeeListProps {
   onDelete: (emp: User) => void;
   onSendEmail: (emp: User) => void;
   sendingEmailId: number | null;
+  onCopySetupLink?: (emp: User) => void;
+  copyingSetupId?: number | null;
 }
 
 export default function EmployeeList({
@@ -25,6 +27,8 @@ export default function EmployeeList({
   onDelete,
   onSendEmail,
   sendingEmailId,
+  onCopySetupLink,
+  copyingSetupId,
 }: EmployeeListProps) {
   if (isLoading) {
     return (
@@ -215,6 +219,23 @@ export default function EmployeeList({
                     >
                       &#9998;
                     </button>
+
+                    {/* Copy Setup Link (Active when setup is pending) */}
+                    {!emp.is_setup_complete && emp.is_active && onCopySetupLink && (
+                      <button
+                        type="button"
+                        onClick={() => onCopySetupLink(emp)}
+                        disabled={copyingSetupId === emp.id}
+                        className="btn btn-secondary btn-icon"
+                        title="Copy Setup Link to Clipboard (Direct link)"
+                        style={{
+                          color: '#38BDF8',
+                          cursor: copyingSetupId === emp.id ? 'wait' : 'pointer'
+                        }}
+                      >
+                        {copyingSetupId === emp.id ? '⌛' : '🔗'}
+                      </button>
+                    )}
 
                     {/* Send Login Email */}
                     <button

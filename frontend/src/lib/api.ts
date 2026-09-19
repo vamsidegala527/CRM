@@ -1,7 +1,7 @@
 import {
   AuthResponse, User,
   EmployeeCreateInput, EmployeeUpdateInput, EmployeeSelfUpdateInput,
-  ChangePasswordInput, EmployeeSetupInput, EmployeeMetrics
+  ChangePasswordInput, EmployeeSetupInput, EmployeeMetrics, EmployeeSetupLinkResponse
 } from '../types/employee';
 
 export function getApiBaseUrl(): string {
@@ -359,10 +359,25 @@ export const api = {
     });
   },
 
-  async sendEmployeeLoginEmail(id: number | string): Promise<{ message: string }> {
-    return request<{ message: string }>(`/api/employees/${id}/send-login-email`, {
+  async sendEmployeeLoginEmail(id: number | string): Promise<EmployeeSetupLinkResponse> {
+    return request<EmployeeSetupLinkResponse>(`/api/employees/${id}/send-login-email`, {
       method: 'POST',
     });
   },
-};
 
+  async getEmployeeSetupLink(id: number | string): Promise<EmployeeSetupLinkResponse> {
+    return request<EmployeeSetupLinkResponse>(`/api/employees/${id}/setup-link`);
+  },
+
+  // Company Details APIs
+  async getCompanyDetails(): Promise<any> {
+    return request<any>('/api/company');
+  },
+
+  async updateCompanyDetails(payload: Record<string, any>): Promise<any> {
+    return request<any>('/api/company', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+};

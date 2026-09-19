@@ -4,6 +4,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Script from 'next/script';
 import { api } from '../../lib/api';
+import { isPasswordValid, PASSWORD_ERROR_MESSAGE } from '../../lib/validation';
+import PasswordInput from '../../components/PasswordInput';
 
 declare global {
   interface Window {
@@ -49,6 +51,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
 
+  // Registration password validation & interaction tracking
+  const [passwordTouched, setPasswordTouched] = useState(false);
+  const [formSubmitted, setFormSubmitted] = useState(false);
+
   // Password reset step (request link or link sent confirmation)
   const [resetStep, setResetStep] = useState<'request' | 'sent'>('request');
 
@@ -58,6 +64,12 @@ export default function LoginPage() {
 
   const [gisLoaded, setGisLoaded] = useState(false);
   const [mounted, setMounted] = useState(false);
+
+  const isPasswordCriteriaMet = isPasswordValid(password);
+  const showPasswordError = authMode === 'register' && (
+    (formSubmitted && !isPasswordCriteriaMet) ||
+    (passwordTouched && password.length > 0 && !isPasswordCriteriaMet)
+  );
 
   useEffect(() => {
     setMounted(true);
@@ -128,22 +140,13 @@ export default function LoginPage() {
 
     try {
       if (authMode === 'register') {
+        setFormSubmitted(true);
         if (!fullName.trim()) {
           setError('Full Name is required for registration.');
           setLoading(false);
           return;
         }
-        if (password.length < 8) {
-          setError('Password must be at least 8 characters.');
-          setLoading(false);
-          return;
-        }
-        const hasUpper = /[A-Z]/.test(password);
-        const hasLower = /[a-z]/.test(password);
-        const hasDigit = /\d/.test(password);
-        const hasSpecial = /[!@#$%^&*(),.?":{}|<>\-_=+[\]\\/;~`]/.test(password);
-        if (!hasUpper || !hasLower || !hasDigit || !hasSpecial) {
-          setError('Password must contain at least 1 uppercase letter, 1 lowercase letter, 1 number, and 1 special character.');
+        if (!isPasswordValid(password)) {
           setLoading(false);
           return;
         }
@@ -156,6 +159,8 @@ export default function LoginPage() {
         setSuccessMsg(res.message || 'Registration successful! Verification token generated. Please log in.');
         setAuthMode('signin');
         setPassword('');
+        setPasswordTouched(false);
+        setFormSubmitted(false);
       } else if (authMode === 'signin') {
         await api.login({ email: email.trim().toLowerCase(), password });
         router.push('/');
@@ -320,6 +325,8 @@ export default function LoginPage() {
                 setResetStep('request');
                 setError(null);
                 setSuccessMsg(null);
+                setPasswordTouched(false);
+                setFormSubmitted(false);
               }}
             >
               Back to Sign In
@@ -401,6 +408,8 @@ export default function LoginPage() {
                       setResetStep('request');
                       setError(null);
                       setSuccessMsg(null);
+                      setPasswordTouched(false);
+                      setFormSubmitted(false);
                     }}
                     style={{
                       background: 'none',
@@ -415,71 +424,28 @@ export default function LoginPage() {
                   </button>
                 )}
               </div>
-              <input
-                type="password"
-                className="form-control"
+              <PasswordInput
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                onBlur={() => {
+                  if (authMode === 'register') {
+                    setPasswordTouched(true);
+                  }
+                }}
+                hasError={showPasswordError}
                 required
               />
-              {authMode === 'register' && (
-                <div style={{ marginTop: '0.45rem', fontSize: '0.75rem' }}>
-                  <div style={{ marginBottom: '0.35rem', color: 'var(--text-subtle)' }}>
-                    Must be at least 8 characters
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
-                    <span style={{
-                      padding: '2px 7px',
-                      borderRadius: '4px',
-                      fontSize: '0.7rem',
-                      background: password.length >= 8 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-                      color: password.length >= 8 ? '#34D399' : 'var(--text-muted)',
-                      border: `1px solid ${password.length >= 8 ? 'rgba(16, 185, 129, 0.4)' : 'var(--border-color)'}`
-                    }}>
-                      {password.length >= 8 ? '✓' : '•'} 8+ chars
-                    </span>
-                    <span style={{
-                      padding: '2px 7px',
-                      borderRadius: '4px',
-                      fontSize: '0.7rem',
-                      background: /[A-Z]/.test(password) ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-                      color: /[A-Z]/.test(password) ? '#34D399' : 'var(--text-muted)',
-                      border: `1px solid ${/[A-Z]/.test(password) ? 'rgba(16, 185, 129, 0.4)' : 'var(--border-color)'}`
-                    }}>
-                      {/[A-Z]/.test(password) ? '✓' : '•'} Uppercase
-                    </span>
-                    <span style={{
-                      padding: '2px 7px',
-                      borderRadius: '4px',
-                      fontSize: '0.7rem',
-                      background: /[a-z]/.test(password) ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-                      color: /[a-z]/.test(password) ? '#34D399' : 'var(--text-muted)',
-                      border: `1px solid ${/[a-z]/.test(password) ? 'rgba(16, 185, 129, 0.4)' : 'var(--border-color)'}`
-                    }}>
-                      {/[a-z]/.test(password) ? '✓' : '•'} Lowercase
-                    </span>
-                    <span style={{
-                      padding: '2px 7px',
-                      borderRadius: '4px',
-                      fontSize: '0.7rem',
-                      background: /\d/.test(password) ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-                      color: /\d/.test(password) ? '#34D399' : 'var(--text-muted)',
-                      border: `1px solid ${/\d/.test(password) ? 'rgba(16, 185, 129, 0.4)' : 'var(--border-color)'}`
-                    }}>
-                      {/\d/.test(password) ? '✓' : '•'} Number
-                    </span>
-                    <span style={{
-                      padding: '2px 7px',
-                      borderRadius: '4px',
-                      fontSize: '0.7rem',
-                      background: /[!@#$%^&*(),.?":{}|<>\-_=+[\]\\/;~`]/.test(password) ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-                      color: /[!@#$%^&*(),.?":{}|<>\-_=+[\]\\/;~`]/.test(password) ? '#34D399' : 'var(--text-muted)',
-                      border: `1px solid ${/[!@#$%^&*(),.?":{}|<>\-_=+[\]\\/;~`]/.test(password) ? 'rgba(16, 185, 129, 0.4)' : 'var(--border-color)'}`
-                    }}>
-                      {/[!@#$%^&*(),.?":{}|<>\-_=+[\]\\/;~`]/.test(password) ? '✓' : '•'} Symbol
-                    </span>
-                  </div>
+              {showPasswordError && (
+                <div
+                  style={{
+                    marginTop: '0.45rem',
+                    fontSize: '0.8rem',
+                    color: '#F87171',
+                    lineHeight: 1.4,
+                  }}
+                >
+                  please provide a valid password
                 </div>
               )}
             </div>
@@ -540,7 +506,7 @@ export default function LoginPage() {
                 Already have an account?{' '}
                 <button
                   type="button"
-                  onClick={() => { setAuthMode('signin'); setError(null); }}
+                  onClick={() => { setAuthMode('signin'); setError(null); setPasswordTouched(false); setFormSubmitted(false); }}
                   style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontWeight: '600' }}
                 >
                   Sign In
@@ -549,7 +515,7 @@ export default function LoginPage() {
             ) : authMode === 'forgot' ? (
               <button
                 type="button"
-                onClick={() => { setAuthMode('signin'); setError(null); setSuccessMsg(null); }}
+                onClick={() => { setAuthMode('signin'); setError(null); setSuccessMsg(null); setPasswordTouched(false); setFormSubmitted(false); }}
                 style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontWeight: '600' }}
               >
                 ← Back to Sign In
@@ -559,7 +525,7 @@ export default function LoginPage() {
                 Need a new account?{' '}
                 <button
                   type="button"
-                  onClick={() => { setAuthMode('register'); setError(null); }}
+                  onClick={() => { setAuthMode('register'); setError(null); setPasswordTouched(false); setFormSubmitted(false); }}
                   style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontWeight: '600' }}
                 >
                   Register Here

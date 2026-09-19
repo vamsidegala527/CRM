@@ -122,3 +122,102 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
         )
     return current_user
 
+
+def generate_employee_setup_token(user: User, base_url: str, expires_hours: int = 48) -> tuple[str, str, str, str]:
+    """
+    Generates a cryptographically secure, signed employee onboarding setup token.
+    Returns: (token, token_hash, setup_url, invitation_code)
+    """
+    import hashlib
+    import secrets
+    import urllib.parse
+    now = datetime.now(timezone.utc)
+    expire = now + timedelta(hours=expires_hours)
+    inv_code = secrets.token_hex(4).upper()  # 8 hex characters, e.g. '8B4A2F1C'
+
+    jwt_payload = {
+        "sub": user.email.lower().strip(),
+        "user_id": user.id,
+        "purpose": "employee_setup",
+        "code": inv_code,
+        "exp": expire,
+        "iat": int(now.timestamp()),
+        "jti": str(uuid.uuid4())
+    }
+    token = jwt.encode(jwt_payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    clean_base = (base_url or settings.FRONTEND_URL or "http://localhost:3000").strip().rstrip('/')
+    quoted_token = urllib.parse.quote(token)
+    quoted_email = urllib.parse.quote(user.email.strip())
+    setup_url = f"{clean_base}/setup-employee?token={quoted_token}&email={quoted_email}"
+
+    return token, token_hash, setup_url, f"#{inv_code}"
+
+
+def verify_employee_setup_token(token_str: str, submitted_email: Optional[str], db: Session) -> Optional[User]:
+    """
+    Verifies an employee setup token using multiple layers:
+    1. Signed JWT validation (cryptographically verifies payload, purpose, and expiration).
+    2. Exact sha256 hash match against user.setup_token_hash.
+    3. Multi-token comma-separated hash match against user.setup_token_hash.
+    4. Fallback lookup by email if valid unexpired invitation exists.
+    """
+    import hashlib
+    from sqlalchemy import func
+    clean_token = token_str.strip()
+    if not clean_token:
+        return None
+
+    # Layer 1: JWT Signature Verification
+    try:
+        payload = jwt.decode(clean_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        if payload.get("purpose") == "employee_setup":
+            user_id = payload.get("user_id")
+            sub_email = payload.get("sub")
+            user = None
+            if user_id:
+                user = db.query(User).filter(User.id == user_id).first()
+            if not user and sub_email:
+                user = db.query(User).filter(func.lower(func.trim(User.email)) == sub_email.lower().strip()).first()
+            if user:
+                # Check revocation
+                if user.token_revoked_at:
+                    token_iat = payload.get("iat")
+                    if token_iat:
+                        iat_dt = datetime.fromtimestamp(token_iat, tz=timezone.utc).replace(tzinfo=None)
+                        if iat_dt <= user.token_revoked_at:
+                            return None
+                return user
+    except (JWTError, Exception):
+        pass
+
+    # Layer 2: SHA256 Hash Matching (exact match)
+    token_hash = hashlib.sha256(clean_token.encode("utf-8")).hexdigest()
+    user = db.query(User).filter(User.setup_token_hash == token_hash).first()
+    if user:
+        return user
+
+    # Layer 3: Comma-separated hash list matching for submitted email
+    if submitted_email:
+        clean_email = submitted_email.strip().lower()
+        user_by_email = db.query(User).filter(func.lower(func.trim(User.email)) == clean_email).first()
+        if user_by_email and user_by_email.setup_token_hash:
+            hashes = [h.strip() for h in user_by_email.setup_token_hash.split(",") if h.strip()]
+            if token_hash in hashes:
+                return user_by_email
+
+    # Layer 4: Scan all pending setup users for comma-separated match
+    pending_users = db.query(User).filter(
+        User.setup_token_hash.isnot(None),
+        User.is_setup_complete == False
+    ).all()
+    for candidate in pending_users:
+        if candidate.setup_token_hash:
+            hashes = [h.strip() for h in candidate.setup_token_hash.split(",") if h.strip()]
+            if token_hash in hashes:
+                return candidate
+
+    return None
+
+
