@@ -1,5 +1,8 @@
 import os
+import json
 import smtplib
+import urllib.request
+import urllib.error
 from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -9,16 +12,101 @@ class EmailDeliveryError(Exception):
     """Custom exception raised when email sending fails."""
     pass
 
+def is_resend_configured() -> bool:
+    """Checks if Resend API key is configured."""
+    return bool((getattr(settings, "RESEND_API_KEY", "") or os.getenv("RESEND_API_KEY", "")).strip())
+
+def is_brevo_api_configured() -> bool:
+    """Checks if Brevo API key is configured."""
+    return bool((getattr(settings, "BREVO_API_KEY", "") or os.getenv("BREVO_API_KEY", "")).strip())
+
 def is_smtp_configured() -> bool:
     """Checks if real SMTP credentials have been provided."""
     return bool(settings.SMTP_USER and settings.SMTP_PASSWORD and settings.SMTP_HOST)
 
 def is_email_service_configured() -> bool:
-    """Checks if SMTP credentials have been configured."""
-    return is_smtp_configured()
+    """Checks if any email service (Resend, Brevo, or SMTP) has been configured."""
+    return is_resend_configured() or is_brevo_api_configured() or is_smtp_configured()
+
+def _send_resend_api(to_email: str, subject: str, html_body: str, text_body: str) -> None:
+    """Sends email directly via Resend HTTPS API (bypasses all cloud port 25/587 blocks)."""
+    api_key = (getattr(settings, "RESEND_API_KEY", "") or os.getenv("RESEND_API_KEY", "")).strip()
+    from_email = settings.SMTP_FROM_EMAIL.strip() or "onboarding@resend.dev"
+    from_name = settings.SMTP_FROM_NAME.strip() or "HR & Employee Management Portal"
+    
+    payload = {
+        "from": f"{from_name} <{from_email}>",
+        "to": [to_email],
+        "subject": subject,
+        "html": html_body,
+        "text": text_body
+    }
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "HR-Management-Portal/2.0"
+        }
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            print(f"✅ [RESEND API] Email successfully delivered to {to_email} (HTTP {resp.status})")
+    except urllib.error.HTTPError as http_err:
+        err_body = http_err.read().decode('utf-8', errors='ignore')
+        print(f"❌ [RESEND API] HTTP Error {http_err.code}: {err_body}")
+        raise EmailDeliveryError(f"Resend email delivery failed ({http_err.code}): {err_body}")
+    except Exception as exc:
+        print(f"❌ [RESEND API] Request failed: {exc}")
+        raise EmailDeliveryError(f"Resend email delivery error: {exc}")
+
+def _send_brevo_api(to_email: str, subject: str, html_body: str, text_body: str) -> None:
+    """Sends email directly via Brevo HTTPS API (bypasses all cloud port 25/587 blocks)."""
+    api_key = (getattr(settings, "BREVO_API_KEY", "") or os.getenv("BREVO_API_KEY", "")).strip()
+    from_email = settings.SMTP_FROM_EMAIL.strip() or settings.SMTP_USER.strip()
+    from_name = settings.SMTP_FROM_NAME.strip() or "HR & Employee Management Portal"
+    
+    payload = {
+        "sender": {"name": from_name, "email": from_email},
+        "to": [{"email": to_email}],
+        "subject": subject,
+        "htmlContent": html_body,
+        "textContent": text_body
+    }
+    req = urllib.request.Request(
+        "https://api.brevo.com/v3/smtp/email",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "api-key": api_key,
+            "Content-Type": "application/json",
+            "User-Agent": "HR-Management-Portal/2.0"
+        }
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            print(f"✅ [BREVO API] Email successfully delivered to {to_email} (HTTP {resp.status})")
+    except urllib.error.HTTPError as http_err:
+        err_body = http_err.read().decode('utf-8', errors='ignore')
+        print(f"❌ [BREVO API] HTTP Error {http_err.code}: {err_body}")
+        raise EmailDeliveryError(f"Brevo email delivery failed ({http_err.code}): {err_body}")
+    except Exception as exc:
+        print(f"❌ [BREVO API] Request failed: {exc}")
+        raise EmailDeliveryError(f"Brevo email delivery error: {exc}")
 
 def _send_mime_message(to_email: str, subject: str, html_body: str, text_body: str) -> None:
-    """Sends a multipart email through the configured SMTP server."""
+    """Sends an email via Resend API, Brevo API, or SMTP server."""
+    # 1. Try Resend HTTPS API if configured (guaranteed to work on Render / cloud)
+    if is_resend_configured():
+        _send_resend_api(to_email, subject, html_body, text_body)
+        return
+
+    # 2. Try Brevo HTTPS API if configured
+    if is_brevo_api_configured():
+        _send_brevo_api(to_email, subject, html_body, text_body)
+        return
+
+    # 3. Try standard SMTP
     if is_smtp_configured():
         from_email = settings.SMTP_FROM_EMAIL.strip() if settings.SMTP_FROM_EMAIL.strip() else settings.SMTP_USER.strip()
         from_name = settings.SMTP_FROM_NAME.strip() if settings.SMTP_FROM_NAME.strip() else "HR & Employee Management Portal"
@@ -36,20 +124,20 @@ def _send_mime_message(to_email: str, subject: str, html_body: str, text_body: s
         smtp_host = settings.SMTP_HOST.strip() or "smtp.gmail.com"
         smtp_user = settings.SMTP_USER.strip()
 
-        # Try the configured provider port first, then the alternate secure port.
+        # Try configured port first, then 465 (SSL), then 587 (TLS), then 2525
         ports_to_try = [settings.SMTP_PORT]
-        alt_port = 465 if settings.SMTP_PORT != 465 else 587
-        if alt_port not in ports_to_try:
-            ports_to_try.append(alt_port)
+        for p in [465, 587, 2525]:
+            if p not in ports_to_try:
+                ports_to_try.append(p)
 
         delivery_error = None
         for port in ports_to_try:
             try:
                 if port == 465:
-                    server = smtplib.SMTP_SSL(smtp_host, port, timeout=10)
+                    server = smtplib.SMTP_SSL(smtp_host, port, timeout=8)
                     server.ehlo()
                 else:
-                    server = smtplib.SMTP(smtp_host, port, timeout=10)
+                    server = smtplib.SMTP(smtp_host, port, timeout=8)
                     server.ehlo()
                     if settings.SMTP_TLS:
                         server.starttls()
@@ -58,19 +146,19 @@ def _send_mime_message(to_email: str, subject: str, html_body: str, text_body: s
                 server.login(smtp_user, clean_password)
                 server.sendmail(from_email, [to_email], msg.as_string())
                 server.quit()
-                print(f"✅ [SMTP] Email successfully delivered to {to_email} via port {port}")
+                print(f"✅ [SMTP] Email successfully delivered to {to_email} via {smtp_host}:{port}")
                 return
             except smtplib.SMTPAuthenticationError as auth_err:
-                print(f"❌ [SMTP] Authentication Failed: {auth_err}")
+                print(f"❌ [SMTP] Authentication Failed on port {port}: {auth_err}")
                 delivery_error = auth_err
                 break
             except Exception as exc:
-                print(f"⚠️ [SMTP] Connection on port {port} failed: {exc}")
+                print(f"⚠️ [SMTP] Connection on {smtp_host}:{port} failed: {exc}")
                 delivery_error = exc
 
         raise EmailDeliveryError(f"Email delivery failed via SMTP (tried ports {ports_to_try}): {str(delivery_error)}")
 
-    # 3. Clean console dispatch & actionable configuration error
+    # 4. Fallback console log when no email service is configured
     print("\n" + "=" * 65)
     print(f"📧 [EMAIL SERVICE - LOCAL CONSOLE DISPATCH]")
     print(f"To: {to_email}")
@@ -79,8 +167,8 @@ def _send_mime_message(to_email: str, subject: str, html_body: str, text_body: s
     print(text_body)
     print("=" * 65 + "\n")
     raise EmailDeliveryError(
-        "Email delivery service is not configured (SMTP_HOST, SMTP_USER, and SMTP_PASSWORD are missing in .env). "
-        "Configure the SMTP credentials supplied by your email provider to send real emails."
+        "Email delivery service is not configured (SMTP credentials or RESEND_API_KEY are missing in .env). "
+        "Configure SMTP credentials or RESEND_API_KEY to send real emails."
     )
 
 def send_verification_email(to_email: str, user_name: str, code: str, frontend_url: str = None) -> None:
