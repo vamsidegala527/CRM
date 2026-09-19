@@ -30,20 +30,12 @@ services:
           type: web
           name: hr-frontend
           property: url
-      - key: SMTP_HOST
-        value: smtp.gmail.com
-      - key: SMTP_PORT
-        value: "587"
-      - key: SMTP_USER
+      - key: BREVO_API_KEY
         sync: false
-      - key: SMTP_PASSWORD
+      - key: BREVO_SENDER_EMAIL
         sync: false
-      - key: SMTP_FROM_EMAIL
-        sync: false
-      - key: SMTP_FROM_NAME
+      - key: BREVO_SENDER_NAME
         value: HR & Employee Management Portal
-      - key: SMTP_TLS
-        value: "true"
 
   # Frontend Next.js Web Service
   - type: web

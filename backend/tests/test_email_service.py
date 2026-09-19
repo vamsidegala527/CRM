@@ -1,27 +1,29 @@
 from unittest.mock import Mock, patch
-
 import pytest
-
 from app import email_service
 
 
-def test_smtp_uses_configured_provider_port(monkeypatch):
-    monkeypatch.setattr(email_service.settings, "SMTP_USER", "sender@example.com")
-    monkeypatch.setattr(email_service.settings, "SMTP_PASSWORD", "password")
-    monkeypatch.setattr(email_service.settings, "SMTP_HOST", "smtp.provider.example")
-    monkeypatch.setattr(email_service.settings, "SMTP_PORT", 2525)
+def test_brevo_sends_via_https_api(monkeypatch):
+    monkeypatch.setattr(email_service.settings, "BREVO_API_KEY", "xkeysib-test-12345")
+    monkeypatch.setattr(email_service.settings, "BREVO_SENDER_EMAIL", "admin@example.com")
+    monkeypatch.setattr(email_service.settings, "BREVO_SENDER_NAME", "Test Portal")
 
-    smtp = Mock()
-    with patch.object(email_service.smtplib, "SMTP", return_value=smtp) as smtp_factory:
-        email_service._send_mime_message("employee@example.com", "Subject", "html", "text")
+    mock_resp = Mock()
+    mock_resp.status = 201
+    mock_resp.__enter__ = Mock(return_value=mock_resp)
+    mock_resp.__exit__ = Mock(return_value=False)
 
-    smtp_factory.assert_called_once_with("smtp.provider.example", 2525, timeout=10)
-    smtp.login.assert_called_once_with("sender@example.com", "password")
+    with patch.object(email_service.urllib.request, "urlopen", return_value=mock_resp) as mock_urlopen:
+        email_service._send_mime_message("user@example.com", "Test Subject", "<p>Hello</p>", "Hello")
+
+    mock_urlopen.assert_called_once()
+    req = mock_urlopen.call_args[0][0]
+    assert req.full_url == "https://api.brevo.com/v3/smtp/email"
+    assert req.headers.get("Api-key") == "xkeysib-test-12345"
 
 
-def test_missing_email_provider_raises_delivery_error(monkeypatch):
-    monkeypatch.setattr(email_service.settings, "SMTP_USER", "")
-    monkeypatch.setattr(email_service.settings, "SMTP_PASSWORD", "")
+def test_missing_brevo_key_raises_delivery_error(monkeypatch):
+    monkeypatch.setattr(email_service.settings, "BREVO_API_KEY", "")
 
     with pytest.raises(email_service.EmailDeliveryError, match="not configured"):
-        email_service._send_mime_message("employee@example.com", "Subject", "html", "text")
+        email_service._send_mime_message("user@example.com", "Subject", "<p>html</p>", "text")

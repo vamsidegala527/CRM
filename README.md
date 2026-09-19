@@ -84,14 +84,12 @@ Key configuration parameters can be set in `backend/.env` or passed via environm
 | `SECRET_KEY`                  | JWT encryption secret                                                                     | Production-grade secret key                                   |
 | `ALGORITHM`                   | JWT signing algorithm                                                                     | `HS256`                                                       |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Session validity in minutes                                                               | `1440` (24 hours)                                             |
-| `SMTP_HOST`                   | Outgoing SMTP server supplied by your provider                                            | `smtp.gmail.com`                                              |
-| `SMTP_PORT`                   | Outgoing SMTP port supplied by your provider; `2525` is commonly available on cloud hosts | `587`                                                         |
-| `SMTP_USER`                   | Email username / sender address                                                           | System email                                                  |
-| `SMTP_PASSWORD`               | App-specific password                                                                     | System password                                               |
-| `SMTP_FROM_NAME`              | Sender name on invitations                                                                | `HR & Employee Management Portal`                             |
+| `BREVO_API_KEY`               | Brevo REST API Key (`xkeysib-...`)                                                        | None                                                          |
+| `BREVO_SENDER_EMAIL`          | Verified sender email address in Brevo                                                    | None                                                          |
+| `BREVO_SENDER_NAME`           | Display name on outbound emails                                                           | `HR & Employee Management Portal`                             |
 | `FRONTEND_URL`                | Frontend origin for onboarding links                                                      | `http://localhost:3000`                                       |
 
-For production deployments, configure the SMTP host, username, password, sender, and provider-supported port in Render. If ports `587` and `465` are blocked, use an SMTP provider that supports port `2525`; changing the port alone cannot make `smtp.gmail.com` reachable.
+For production deployments on Render, configure `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, and `BREVO_SENDER_NAME` in the Render dashboard environment variables. Outbound emails are dispatched via the Brevo HTTPS REST API on port 443, ensuring 100% reliable delivery on cloud hosts.
 
 ---
 

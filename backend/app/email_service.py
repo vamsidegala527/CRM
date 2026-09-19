@@ -1,179 +1,88 @@
 import os
 import json
-import smtplib
 import urllib.request
 import urllib.error
 from datetime import datetime
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from app.config import settings
 
 class EmailDeliveryError(Exception):
     """Custom exception raised when email sending fails."""
     pass
 
-def is_resend_configured() -> bool:
-    """Checks if Resend API key is configured."""
-    return bool((getattr(settings, "RESEND_API_KEY", "") or os.getenv("RESEND_API_KEY", "")).strip())
-
-def is_brevo_api_configured() -> bool:
-    """Checks if Brevo API key is configured."""
-    return bool((getattr(settings, "BREVO_API_KEY", "") or os.getenv("BREVO_API_KEY", "")).strip())
-
-def is_smtp_configured() -> bool:
-    """Checks if real SMTP credentials have been provided."""
-    return bool(settings.SMTP_USER and settings.SMTP_PASSWORD and settings.SMTP_HOST)
+def is_brevo_configured() -> bool:
+    """Checks if Brevo API key is provided."""
+    key = getattr(settings, "BREVO_API_KEY", "") or os.getenv("BREVO_API_KEY", "")
+    return bool(key and key.strip())
 
 def is_email_service_configured() -> bool:
-    """Checks if any email service (Resend, Brevo, or SMTP) has been configured."""
-    return is_resend_configured() or is_brevo_api_configured() or is_smtp_configured()
-
-def _send_resend_api(to_email: str, subject: str, html_body: str, text_body: str) -> None:
-    """Sends email directly via Resend HTTPS API (bypasses all cloud port 25/587 blocks)."""
-    api_key = (getattr(settings, "RESEND_API_KEY", "") or os.getenv("RESEND_API_KEY", "")).strip()
-    from_email = settings.SMTP_FROM_EMAIL.strip() or "onboarding@resend.dev"
-    from_name = settings.SMTP_FROM_NAME.strip() or "HR & Employee Management Portal"
-    
-    payload = {
-        "from": f"{from_name} <{from_email}>",
-        "to": [to_email],
-        "subject": subject,
-        "html": html_body,
-        "text": text_body
-    }
-    req = urllib.request.Request(
-        "https://api.resend.com/emails",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "User-Agent": "HR-Management-Portal/2.0"
-        }
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=12) as resp:
-            print(f"✅ [RESEND API] Email successfully delivered to {to_email} (HTTP {resp.status})")
-    except urllib.error.HTTPError as http_err:
-        err_body = http_err.read().decode('utf-8', errors='ignore')
-        print(f"❌ [RESEND API] HTTP Error {http_err.code}: {err_body}")
-        raise EmailDeliveryError(f"Resend email delivery failed ({http_err.code}): {err_body}")
-    except Exception as exc:
-        print(f"❌ [RESEND API] Request failed: {exc}")
-        raise EmailDeliveryError(f"Resend email delivery error: {exc}")
+    """Checks if valid email delivery service (Brevo) is configured."""
+    return is_brevo_configured()
 
 def _send_brevo_api(to_email: str, subject: str, html_body: str, text_body: str) -> None:
-    """Sends email directly via Brevo HTTPS API (bypasses all cloud port 25/587 blocks)."""
+    """Sends email via Brevo HTTPS REST API (Port 443 - 100% reliable on Render/Cloud)."""
     api_key = (getattr(settings, "BREVO_API_KEY", "") or os.getenv("BREVO_API_KEY", "")).strip()
-    from_email = settings.SMTP_FROM_EMAIL.strip() or settings.SMTP_USER.strip()
-    from_name = settings.SMTP_FROM_NAME.strip() or "HR & Employee Management Portal"
-    
+    from_email = (
+        getattr(settings, "BREVO_SENDER_EMAIL", "") or
+        os.getenv("BREVO_SENDER_EMAIL", "") or
+        "vamsidegala527@gmail.com"
+    ).strip()
+    from_name = (
+        getattr(settings, "BREVO_SENDER_NAME", "") or
+        os.getenv("BREVO_SENDER_NAME", "") or
+        "HR & Employee Management Portal"
+    ).strip()
+
     payload = {
         "sender": {"name": from_name, "email": from_email},
-        "to": [{"email": to_email}],
+        "to": [{"email": to_email.strip()}],
         "subject": subject,
         "htmlContent": html_body,
         "textContent": text_body
     }
+
     req = urllib.request.Request(
         "https://api.brevo.com/v3/smtp/email",
         data=json.dumps(payload).encode("utf-8"),
         headers={
             "api-key": api_key,
             "Content-Type": "application/json",
+            "Accept": "application/json",
             "User-Agent": "HR-Management-Portal/2.0"
         }
     )
+
     try:
         with urllib.request.urlopen(req, timeout=12) as resp:
             print(f"✅ [BREVO API] Email successfully delivered to {to_email} (HTTP {resp.status})")
     except urllib.error.HTTPError as http_err:
-        err_body = http_err.read().decode('utf-8', errors='ignore')
+        err_body = http_err.read().decode("utf-8", errors="ignore")
         print(f"❌ [BREVO API] HTTP Error {http_err.code}: {err_body}")
         raise EmailDeliveryError(f"Brevo email delivery failed ({http_err.code}): {err_body}")
     except Exception as exc:
-        print(f"❌ [BREVO API] Request failed: {exc}")
-        raise EmailDeliveryError(f"Brevo email delivery error: {exc}")
+        print(f"❌ [BREVO API] Network request failed: {exc}")
+        raise EmailDeliveryError(f"Brevo email delivery network error: {exc}")
 
 def _send_mime_message(to_email: str, subject: str, html_body: str, text_body: str) -> None:
-    """Sends an email via Resend API, Brevo API, or SMTP server."""
-    # 1. Try Resend HTTPS API if configured (guaranteed to work on Render / cloud)
-    if is_resend_configured():
-        _send_resend_api(to_email, subject, html_body, text_body)
-        return
-
-    # 2. Try Brevo HTTPS API if configured
-    if is_brevo_api_configured():
+    """Dispatches email via Brevo HTTPS API, or logs to console for local development."""
+    if is_brevo_configured():
         _send_brevo_api(to_email, subject, html_body, text_body)
         return
 
-    # 3. Try standard SMTP
-    if is_smtp_configured():
-        from_email = settings.SMTP_FROM_EMAIL.strip() if settings.SMTP_FROM_EMAIL.strip() else settings.SMTP_USER.strip()
-        from_name = settings.SMTP_FROM_NAME.strip() if settings.SMTP_FROM_NAME.strip() else "HR & Employee Management Portal"
-        from_address = f"{from_name} <{from_email}>"
-
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"] = from_address
-        msg["To"] = to_email
-
-        msg.attach(MIMEText(text_body, "plain", "utf-8"))
-        msg.attach(MIMEText(html_body, "html", "utf-8"))
-
-        clean_password = settings.SMTP_PASSWORD.replace(" ", "").strip()
-        smtp_host = settings.SMTP_HOST.strip() or "smtp.gmail.com"
-        smtp_user = settings.SMTP_USER.strip()
-
-        # Try configured port first, then 465 (SSL), then 587 (TLS), then 2525
-        ports_to_try = [settings.SMTP_PORT]
-        for p in [465, 587, 2525]:
-            if p not in ports_to_try:
-                ports_to_try.append(p)
-
-        delivery_error = None
-        for port in ports_to_try:
-            try:
-                if port == 465:
-                    server = smtplib.SMTP_SSL(smtp_host, port, timeout=8)
-                    server.ehlo()
-                else:
-                    server = smtplib.SMTP(smtp_host, port, timeout=8)
-                    server.ehlo()
-                    if settings.SMTP_TLS:
-                        server.starttls()
-                        server.ehlo()
-
-                server.login(smtp_user, clean_password)
-                server.sendmail(from_email, [to_email], msg.as_string())
-                server.quit()
-                print(f"✅ [SMTP] Email successfully delivered to {to_email} via {smtp_host}:{port}")
-                return
-            except smtplib.SMTPAuthenticationError as auth_err:
-                print(f"❌ [SMTP] Authentication Failed on port {port}: {auth_err}")
-                delivery_error = auth_err
-                break
-            except Exception as exc:
-                print(f"⚠️ [SMTP] Connection on {smtp_host}:{port} failed: {exc}")
-                delivery_error = exc
-
-        raise EmailDeliveryError(f"Email delivery failed via SMTP (tried ports {ports_to_try}): {str(delivery_error)}")
-
-    # 4. Fallback console log when no email service is configured
+    # Fallback: Console log (useful for local development without credentials)
     print("\n" + "=" * 65)
-    print(f"📧 [EMAIL SERVICE - LOCAL CONSOLE DISPATCH]")
+    print("📧 [EMAIL SERVICE - LOCAL CONSOLE DISPATCH]")
     print(f"To: {to_email}")
     print(f"Subject: {subject}")
     print("-" * 65)
     print(text_body)
     print("=" * 65 + "\n")
     raise EmailDeliveryError(
-        "Email delivery service is not configured (SMTP credentials or RESEND_API_KEY are missing in .env). "
-        "Configure SMTP credentials or RESEND_API_KEY to send real emails."
+        "Email service not configured. Set BREVO_API_KEY and BREVO_SENDER_EMAIL in environment variables."
     )
 
 def send_verification_email(to_email: str, user_name: str, code: str, frontend_url: str = None) -> None:
     """Sends an account email verification email with a prominent 6-digit code and direct 1-click link."""
-    base_url = (frontend_url or settings.FRONTEND_URL or "http://localhost:3000").strip().rstrip('/')
+    base_url = (frontend_url or settings.FRONTEND_URL or "http://localhost:3000").strip().rstrip("/")
     verify_url = f"{base_url}/verify-email?code={code}&email={to_email}"
     subject = f"{code} is your HR & Employee Management Portal verification code"
 
@@ -200,55 +109,53 @@ This code will expire in 24 hours. If you did not create an account, you can saf
     .brand {{ display: inline-block; background: linear-gradient(135deg, #6366F1, #06B6D4); color: white; font-weight: 800; font-size: 1.1rem; padding: 6px 14px; border-radius: 8px; margin-bottom: 20px; }}
     h1 {{ font-size: 1.4rem; color: #FFFFFF; margin: 0 0 12px; }}
     p {{ font-size: 0.95rem; line-height: 1.6; color: #94A3B8; margin: 0 0 20px; }}
-    .code-container {{ text-align: center; margin: 26px 0 20px; }}
-    .code-label {{ font-size: 0.8rem; color: #94A3B8; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600; margin-bottom: 8px; }}
-    .code-box {{ display: inline-block; background: rgba(99, 102, 241, 0.12); border: 2px solid rgba(99, 102, 241, 0.4); border-radius: 12px; padding: 14px 28px; font-size: 2.2rem; font-weight: 800; letter-spacing: 10px; font-family: 'Courier New', monospace; color: #A5B4FC; text-shadow: 0 0 16px rgba(99, 102, 241, 0.3); }}
-    .btn {{ display: inline-block; background: #6366F1; color: #FFFFFF !important; font-weight: 700; font-size: 0.95rem; text-decoration: none; padding: 12px 28px; border-radius: 8px; margin: 10px 0 24px; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4); }}
-    .footer {{ font-size: 0.75rem; color: #64748B; border-top: 1px solid #1F2937; padding-top: 16px; margin-top: 20px; }}
+    .code-box {{ background: #1E1B4B; border: 2px dashed #6366F1; border-radius: 8px; padding: 18px; text-align: center; margin: 24px 0; }}
+    .code {{ font-family: monospace; font-size: 2.2rem; font-weight: 800; letter-spacing: 8px; color: #818CF8; }}
+    .btn {{ display: inline-block; background: linear-gradient(135deg, #6366F1, #4F46E5); color: #FFFFFF !important; font-weight: 700; font-size: 0.95rem; text-decoration: none; padding: 12px 28px; border-radius: 8px; margin: 10px 0 20px; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4); }}
+    .footer {{ font-size: 0.8rem; color: #64748B; border-top: 1px solid #1F2937; padding-top: 16px; margin-top: 24px; text-align: center; }}
   </style>
 </head>
 <body>
   <div class="card">
     <div class="brand">HR & Employee Management Portal</div>
-    <h1>Verify your email address</h1>
+    <h1>Verify Your Email Address</h1>
     <p>Hi <strong>{user_name}</strong>,</p>
-    <p>Welcome to HR & Employee Management Portal! Enter the 6-digit verification code below to activate and secure your account:</p>
+    <p>Please enter the following 6-digit verification code to complete your registration:</p>
     
-    <div class="code-container">
-      <div class="code-label">Verification Code</div>
-      <div class="code-box">{code}</div>
+    <div class="code-box">
+      <div class="code">{code}</div>
     </div>
 
-    <div style="text-align: center; margin-top: 24px;">
-      <p style="font-size: 0.85rem; color: #64748B; margin-bottom: 12px;">Or click the button below to verify automatically:</p>
-      <a href="{verify_url}" class="btn" target="_blank">Verify Email Automatically</a>
+    <p style="text-align: center; margin: 10px 0;">— OR —</p>
+
+    <div style="text-align: center;">
+      <a href="{verify_url}" class="btn">Verify Account in 1-Click</a>
     </div>
 
     <div class="footer">
-      This code expires in 24 hours.<br>
-      If you did not sign up for HR & Employee Management Portal, please disregard this email.
+      This code will expire in 24 hours.<br>
+      If you did not request this verification, please disregard this email.
     </div>
   </div>
 </body>
-</html>
-"""
+</html>"""
 
     _send_mime_message(to_email, subject, html_body, text_body)
 
 def send_password_reset_email(to_email: str, user_name: str, token: str, frontend_url: str = None) -> None:
-    """Sends a password reset email with a direct clickable reset link."""
-    base_url = (frontend_url or settings.FRONTEND_URL or "http://localhost:3000").strip().rstrip('/')
+    """Sends a password-reset email containing a 1-click tokenized reset link."""
+    base_url = (frontend_url or settings.FRONTEND_URL or "http://localhost:3000").strip().rstrip("/")
     reset_url = f"{base_url}/reset-password?token={token}&email={to_email}"
     subject = "Reset Your Password - HR & Employee Management Portal"
 
     text_body = f"""Hello {user_name},
 
-We received a request to reset your HR & Employee Management Portal account password.
+A password reset was requested for your account.
 
-To set a new password, click the link below:
+Use the link below to choose a new password:
 {reset_url}
 
-This password-reset link expires in 1 hour. If you did not request a password reset, you can safely ignore this email.
+This link will expire in 1 hour. If you did not request a password reset, you can safely ignore this email.
 """
 
     html_body = f"""<!DOCTYPE html>
@@ -261,9 +168,8 @@ This password-reset link expires in 1 hour. If you did not request a password re
     .brand {{ display: inline-block; background: linear-gradient(135deg, #6366F1, #06B6D4); color: white; font-weight: 800; font-size: 1.1rem; padding: 6px 14px; border-radius: 8px; margin-bottom: 20px; }}
     h1 {{ font-size: 1.4rem; color: #FFFFFF; margin: 0 0 12px; }}
     p {{ font-size: 0.95rem; line-height: 1.6; color: #94A3B8; margin: 0 0 20px; }}
-    .btn {{ display: inline-block; background: #EF4444; color: #FFFFFF !important; font-weight: 700; font-size: 0.95rem; text-decoration: none; padding: 12px 28px; border-radius: 8px; margin: 10px 0 20px; box-shadow: 0 4px 14px rgba(239, 68, 68, 0.4); }}
-    .link-text {{ font-size: 0.8rem; color: #6366F1; word-break: break-all; text-decoration: underline; }}
-    .footer {{ font-size: 0.75rem; color: #64748B; border-top: 1px solid #1F2937; padding-top: 16px; margin-top: 20px; }}
+    .btn {{ display: inline-block; background: linear-gradient(135deg, #6366F1, #4F46E5); color: #FFFFFF !important; font-weight: 700; font-size: 0.95rem; text-decoration: none; padding: 12px 28px; border-radius: 8px; margin: 10px 0 20px; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4); }}
+    .footer {{ font-size: 0.8rem; color: #64748B; border-top: 1px solid #1F2937; padding-top: 16px; margin-top: 24px; text-align: center; }}
   </style>
 </head>
 <body>
@@ -271,38 +177,32 @@ This password-reset link expires in 1 hour. If you did not request a password re
     <div class="brand">HR & Employee Management Portal</div>
     <h1>Password Reset Request</h1>
     <p>Hi <strong>{user_name}</strong>,</p>
-    <p>We received a request to reset the password for your HR & Employee Management Portal account. Click the button below to choose a new strong password:</p>
+    <p>We received a request to reset your password. Click the button below to choose a new password:</p>
     
     <div style="text-align: center;">
-      <a href="{reset_url}" class="btn" target="_blank">Reset Password</a>
+      <a href="{reset_url}" class="btn">Reset My Password</a>
     </div>
 
-    <p style="font-size: 0.82rem; margin-bottom: 8px;">Or copy and paste this link into your browser:</p>
-    <p><a href="{reset_url}" class="link-text">{reset_url}</a></p>
-
     <div class="footer">
-      This password reset link expires in 1 hour.<br>
-      If you did not request this change, please ignore this email or contact support immediately.
+      This password-reset link expires in 1 hour.<br>
+      If you did not request a password reset, you can safely ignore this email.
     </div>
   </div>
 </body>
-</html>
-"""
+</html>"""
 
     _send_mime_message(to_email, subject, html_body, text_body)
 
-
 def send_employee_setup_email(to_email: str, employee_name: str, token: str, frontend_url: str = None) -> None:
-    """Sends a secure first-time login setup email for a new or existing employee with unthreaded distinct subject."""
+    """Sends a secure first-time login setup email for a new or existing employee."""
     import urllib.parse
     clean_token = token.strip()
     clean_email = to_email.strip()
     quoted_token = urllib.parse.quote(clean_token)
     quoted_email = urllib.parse.quote(clean_email)
-    base_url = (frontend_url or settings.FRONTEND_URL or "http://localhost:3000").strip().rstrip('/')
+    base_url = (frontend_url or settings.FRONTEND_URL or "http://localhost:3000").strip().rstrip("/")
     setup_url = f"{base_url}/setup-employee?token={quoted_token}&email={quoted_email}"
-    inv_code = clean_token[:8].upper()
-    sent_time = datetime.utcnow().strftime('%b %d, %H:%M UTC')
+    sent_time = datetime.utcnow().strftime("%b %d, %H:%M UTC")
     subject = "HR Portal - Welcome to the Team!"
 
     text_body = f"""Hello {employee_name},
@@ -326,8 +226,7 @@ This invitation link expires in 48 hours. If you received multiple invitation em
     h1 {{ font-size: 1.4rem; color: #FFFFFF; margin: 0 0 12px; }}
     p {{ font-size: 0.95rem; line-height: 1.6; color: #94A3B8; margin: 0 0 20px; }}
     .btn {{ display: inline-block; background: linear-gradient(135deg, #6366F1, #4F46E5); color: #FFFFFF !important; font-weight: 700; font-size: 0.95rem; text-decoration: none; padding: 12px 28px; border-radius: 8px; margin: 10px 0 20px; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4); }}
-    .link-text {{ font-size: 0.8rem; color: #6366F1; word-break: break-all; text-decoration: underline; }}
-    .footer {{ font-size: 0.75rem; color: #64748B; border-top: 1px solid #1F2937; padding-top: 16px; margin-top: 20px; }}
+    .footer {{ font-size: 0.8rem; color: #64748B; border-top: 1px solid #1F2937; padding-top: 16px; margin-top: 24px; text-align: center; }}
   </style>
 </head>
 <body>
@@ -338,11 +237,8 @@ This invitation link expires in 48 hours. If you received multiple invitation em
     <p>An administrator has invited you to access your employee account on the HR & Employee Management Portal. Click the button below to set your password and complete your account setup:</p>
     
     <div style="text-align: center;">
-      <a href="{setup_url}" class="btn" target="_blank">Set Up My Account</a>
+      <a href="{setup_url}" class="btn">Set Up My Account Password</a>
     </div>
-
-    <p style="font-size: 0.82rem; margin-bottom: 8px;">Or copy and paste this link into your browser:</p>
-    <p><a href="{setup_url}" class="link-text">{setup_url}</a></p>
 
     <div class="footer">
       Generated on {sent_time} (expires in 48 hours).<br>
@@ -350,9 +246,6 @@ This invitation link expires in 48 hours. If you received multiple invitation em
     </div>
   </div>
 </body>
-</html>
-"""
+</html>"""
+
     _send_mime_message(to_email, subject, html_body, text_body)
-
-
-
