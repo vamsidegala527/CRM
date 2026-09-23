@@ -31,6 +31,13 @@ class User(Base):
     company = Column(String, nullable=True)
     address = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    emergency_contact = Column(String, nullable=True)
+    experience_years = Column(String, nullable=True)
+    previous_companies = Column(Text, nullable=True)
+    previous_roles = Column(Text, nullable=True)
+    skills = Column(Text, nullable=True)
+    education = Column(Text, nullable=True)
+    certifications = Column(Text, nullable=True)
     setup_token_hash = Column(String, nullable=True, index=True)
     setup_token_expires = Column(DateTime, nullable=True)
     verification_token = Column(String, nullable=True, index=True)
@@ -90,5 +97,19 @@ class CompanyDetails(Base):
     key_clients = Column(Text, nullable=True)
     certifications = Column(Text, nullable=True)
     awards = Column(Text, nullable=True)
+
+    # --- Workplace Policies & Benefits ---
+    work_model = Column(String, nullable=True)          # Remote | Hybrid | On-site | Flexible
+    working_hours = Column(String, nullable=True)       # e.g. "09:00 - 18:00 (EST / UTC-5)"
+    leave_policy_summary = Column(Text, nullable=True)  # Standard leave / PTO & holiday guidelines
+    benefits_summary = Column(Text, nullable=True)      # Health insurance, wellness, learning stipend
+    workplace_guidelines = Column(Text, nullable=True)  # Code of conduct, communication norms
+
+    # --- Leadership & Key Contacts ---
+    executive_leadership = Column(Text, nullable=True)  # Founders, CEO, Key Executives
+    hr_contact_email = Column(String, nullable=True)    # Internal HR support email
+    it_support_email = Column(String, nullable=True)    # Internal IT / Helpdesk contact
+    finance_email = Column(String, nullable=True)       # Payroll & reimbursements contact
+    emergency_contact = Column(String, nullable=True)   # Emergency escalation number / helpline
 
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)

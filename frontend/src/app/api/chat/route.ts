@@ -2,6 +2,7 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createGroq } from '@ai-sdk/groq';
 import { streamText, tool, stepCountIs } from 'ai';
 import { z } from 'zod';
+import { isValidEmail, EMAIL_ERROR_MESSAGE } from '@/lib/validators/emailValidator';
 
 function sanitizeMessages(rawMessages: any[]): any[] {
   if (!Array.isArray(rawMessages)) return [];
@@ -153,7 +154,7 @@ export async function POST(req: Request) {
 
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          throw new Error(data.detail || `Backend API error: ${res.statusText}`);
+          throw new Error(data.detail || 'Unable to connect to service.');
         }
         return data;
       } catch (err: any) {
@@ -203,7 +204,10 @@ export async function POST(req: Request) {
 
     const createEmployeeSchema = z.object({
       full_name: z.string().describe('Full legal or preferred name of the employee'),
-      email: z.string().describe('Corporate email address of the employee'),
+      email: z
+        .string()
+        .refine((val) => isValidEmail(val), { message: EMAIL_ERROR_MESSAGE })
+        .describe('Corporate email address of the employee'),
       department: z.string().optional().describe('Department name (e.g. Engineering, Sales, HR, Marketing)'),
       job_title: z.string().optional().describe('Official job title or position'),
       company: z.string().optional().describe('Company or organization name'),
@@ -528,7 +532,7 @@ CONVERSATION & RESPONSE GUIDELINES:
         msg.includes('consumer identity') ||
         msg.includes('invalid_api_key')
       ) {
-        return 'AI API key is missing or invalid. Please check your GROQ_API_KEY or GEMINI_API_KEY environment variable.';
+        return 'AI assistant is not configured. Please contact your administrator.';
       }
       if (
         msg.includes('quota') ||
@@ -537,19 +541,21 @@ CONVERSATION & RESPONSE GUIDELINES:
         msg.includes('RESOURCE_EXHAUSTED') ||
         msg.includes('rate-limits') ||
         msg.includes('rate_limit_exceeded') ||
+        msg.includes('Rate limit') ||
+        msg.includes('tokens per minute') ||
         msg.includes('output tokens per minute') ||
         msg.includes('OTPM') ||
         msg.includes('Request too large')
       ) {
-        return 'AI rate limit reached. Please wait a brief moment before sending another message.';
+        return 'Too many requests. Please wait a moment and try again.';
       }
       if (msg.includes('Unauthorized') || msg.includes('token') || msg.includes('Not authenticated')) {
-        return 'Authentication token missing or expired. Please sign in again.';
+        return 'Session expired. Please sign in again.';
       }
-      if (msg.includes('ECONNREFUSED') || msg.includes('fetchBackend error') || msg.includes('Failed to fetch')) {
-        return 'The AI assistant was unable to communicate with the backend database. Please verify the backend service is running.';
+      if (msg.includes('ECONNREFUSED') || msg.includes('fetchBackend error') || msg.includes('Failed to fetch') || msg.includes('waking up')) {
+        return 'Server is waking up. Please try again in a few moments.';
       }
-      return `AI assistant error: ${msg || 'Please try again.'}`;
+      return 'Something went wrong. Please try again.';
     };
 
     return typeof (result as any).toUIMessageStreamResponse === 'function'
@@ -558,7 +564,7 @@ CONVERSATION & RESPONSE GUIDELINES:
   } catch (error: any) {
     console.error('[AI Chatbot API Error]:', error);
     return new Response(
-      JSON.stringify({ error: error.message || 'An error occurred processing your AI request.' }),
+      JSON.stringify({ error: 'Something went wrong. Please try again.' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   }

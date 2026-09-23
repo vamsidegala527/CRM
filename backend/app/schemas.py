@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Optional, List, Any
 # pyrefly: ignore [missing-import]
 from pydantic import BaseModel, EmailStr, field_validator, model_validator, Field, ConfigDict
+from app.validators import validate_email_strict
 
 
 NAME_REGEX = re.compile(r"^[a-zA-Z0-9\s\-\'\.\,]+$")
@@ -88,13 +89,7 @@ class UserBase(BaseModel):
     @field_validator("email", mode="before")
     @classmethod
     def clean_email(cls, v: str) -> str:
-        if isinstance(v, str):
-            v = v.strip().lower()
-            if not v:
-                raise ValueError("Email cannot be empty.")
-            if len(v) > 255:
-                raise ValueError("Email address cannot exceed 255 characters.")
-        return v
+        return validate_email_strict(v)
 
     @field_validator("full_name", mode="before")
     @classmethod
@@ -116,9 +111,7 @@ class UserLogin(BaseModel):
     @field_validator("email", mode="before")
     @classmethod
     def clean_email(cls, v: str) -> str:
-        if isinstance(v, str):
-            return v.strip().lower()
-        return v
+        return validate_email_strict(v)
 
 class GoogleAuthRequest(BaseModel):
     id_token: str
@@ -137,8 +130,18 @@ class VerifyEmailRequest(BaseModel):
 class ResendVerificationRequest(BaseModel):
     email: EmailStr
 
+    @field_validator("email", mode="before")
+    @classmethod
+    def clean_email(cls, v: str) -> str:
+        return validate_email_strict(v)
+
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def clean_email(cls, v: str) -> str:
+        return validate_email_strict(v)
 
 class ResetPasswordRequest(BaseModel):
     token: str = Field(..., min_length=1)
@@ -170,6 +173,13 @@ class UserResponse(UserBase):
     company: Optional[str] = None
     address: Optional[str] = None
     notes: Optional[str] = None
+    emergency_contact: Optional[str] = None
+    experience_years: Optional[str] = None
+    previous_companies: Optional[str] = None
+    previous_roles: Optional[str] = None
+    skills: Optional[str] = None
+    education: Optional[str] = None
+    certifications: Optional[str] = None
     role: str = "admin"
     created_at: datetime
     google_id: Optional[str] = None
@@ -200,15 +210,18 @@ class EmployeeCreate(BaseModel):
     address: Optional[str] = Field(None, max_length=300)
     notes: Optional[str] = Field(None, max_length=1000)
     phone: Optional[str] = Field(None, max_length=25)
+    emergency_contact: Optional[str] = Field(None, max_length=100)
+    experience_years: Optional[str] = Field(None, max_length=50)
+    previous_companies: Optional[str] = Field(None, max_length=2000)
+    previous_roles: Optional[str] = Field(None, max_length=2000)
+    skills: Optional[str] = Field(None, max_length=2000)
+    education: Optional[str] = Field(None, max_length=2000)
+    certifications: Optional[str] = Field(None, max_length=2000)
 
     @field_validator("email", mode="before")
     @classmethod
     def clean_email(cls, v: str) -> str:
-        if isinstance(v, str):
-            v = v.strip().lower()
-            if not v:
-                raise ValueError("Email cannot be empty.")
-        return v
+        return validate_email_strict(v)
 
     @field_validator("full_name", mode="before")
     @classmethod
@@ -244,6 +257,14 @@ class EmployeeCreate(BaseModel):
     def clean_phone(cls, v: Optional[str]) -> Optional[str]:
         return validate_phone_number(v)
 
+    @field_validator("emergency_contact", "experience_years", "previous_companies", "previous_roles", "skills", "education", "certifications", mode="before")
+    @classmethod
+    def clean_career_fields(cls, v: Optional[str]) -> Optional[str]:
+        if isinstance(v, str):
+            v = sanitize_input_text(v)
+            return v if v else None
+        return v
+
 class EmployeeUpdate(BaseModel):
     full_name: Optional[str] = None
     department: Optional[str] = Field(None, max_length=100)
@@ -253,6 +274,13 @@ class EmployeeUpdate(BaseModel):
     notes: Optional[str] = Field(None, max_length=1000)
     phone: Optional[str] = Field(None, max_length=25)
     is_active: Optional[bool] = None
+    emergency_contact: Optional[str] = Field(None, max_length=100)
+    experience_years: Optional[str] = Field(None, max_length=50)
+    previous_companies: Optional[str] = Field(None, max_length=2000)
+    previous_roles: Optional[str] = Field(None, max_length=2000)
+    skills: Optional[str] = Field(None, max_length=2000)
+    education: Optional[str] = Field(None, max_length=2000)
+    certifications: Optional[str] = Field(None, max_length=2000)
 
     @field_validator("full_name", mode="before")
     @classmethod
@@ -290,11 +318,26 @@ class EmployeeUpdate(BaseModel):
     def clean_phone(cls, v: Optional[str]) -> Optional[str]:
         return validate_phone_number(v)
 
+    @field_validator("emergency_contact", "experience_years", "previous_companies", "previous_roles", "skills", "education", "certifications", mode="before")
+    @classmethod
+    def clean_career_fields(cls, v: Optional[str]) -> Optional[str]:
+        if isinstance(v, str):
+            v = sanitize_input_text(v)
+            return v if v else None
+        return v
+
 class EmployeeSelfUpdate(BaseModel):
     full_name: Optional[str] = None
     department: Optional[str] = Field(None, max_length=100)
     phone: Optional[str] = Field(None, max_length=25)
     address: Optional[str] = Field(None, max_length=300)
+    emergency_contact: Optional[str] = Field(None, max_length=100)
+    experience_years: Optional[str] = Field(None, max_length=50)
+    previous_companies: Optional[str] = Field(None, max_length=2000)
+    previous_roles: Optional[str] = Field(None, max_length=2000)
+    skills: Optional[str] = Field(None, max_length=2000)
+    education: Optional[str] = Field(None, max_length=2000)
+    certifications: Optional[str] = Field(None, max_length=2000)
 
     @field_validator("full_name", mode="before")
     @classmethod
@@ -316,11 +359,24 @@ class EmployeeSelfUpdate(BaseModel):
             return v if v else None
         return v
 
+    @field_validator("emergency_contact", "experience_years", "previous_companies", "previous_roles", "skills", "education", "certifications", mode="before")
+    @classmethod
+    def clean_career_fields(cls, v: Optional[str]) -> Optional[str]:
+        if isinstance(v, str):
+            v = sanitize_input_text(v)
+            return v if v else None
+        return v
+
 class EmployeeSetupRequest(BaseModel):
     token: str = Field(..., min_length=1)
     email: EmailStr
     new_password: str = Field(..., min_length=8, max_length=72)
     confirm_password: Optional[str] = None
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def clean_email(cls, v: str) -> str:
+        return validate_email_strict(v)
 
     @field_validator("new_password")
     @classmethod
@@ -402,6 +458,35 @@ class CompanyDetailsResponse(BaseModel):
     certifications: Optional[str] = None
     awards: Optional[str] = None
 
+    # Workplace Policies & Benefits
+    work_model: Optional[str] = None
+    working_hours: Optional[str] = None
+    leave_policy_summary: Optional[str] = None
+    benefits_summary: Optional[str] = None
+    workplace_guidelines: Optional[str] = None
+
+    # Leadership & Key Contacts
+    executive_leadership: Optional[str] = None
+    hr_contact_email: Optional[str] = None
+    it_support_email: Optional[str] = None
+    finance_email: Optional[str] = None
+    emergency_contact: Optional[str] = None
+
+    @field_validator(
+        "contact_email", "support_email", "hr_contact_email", "it_support_email", "finance_email",
+        mode="before"
+    )
+    @classmethod
+    def clean_company_emails(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return None
+            return validate_email_strict(v)
+        return v
+
     updated_at: Optional[datetime] = None
 
 
@@ -448,3 +533,32 @@ class CompanyDetailsUpdate(BaseModel):
     key_clients: Optional[str] = None
     certifications: Optional[str] = None
     awards: Optional[str] = None
+
+    # Workplace Policies & Benefits
+    work_model: Optional[str] = None
+    working_hours: Optional[str] = None
+    leave_policy_summary: Optional[str] = None
+    benefits_summary: Optional[str] = None
+    workplace_guidelines: Optional[str] = None
+
+    # Leadership & Key Contacts
+    executive_leadership: Optional[str] = None
+    hr_contact_email: Optional[str] = None
+    it_support_email: Optional[str] = None
+    finance_email: Optional[str] = None
+    emergency_contact: Optional[str] = None
+
+    @field_validator(
+        "contact_email", "support_email", "hr_contact_email", "it_support_email", "finance_email",
+        mode="before"
+    )
+    @classmethod
+    def clean_update_company_emails(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return None
+            return validate_email_strict(v)
+        return v

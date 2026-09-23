@@ -3,6 +3,7 @@ import {
   EmployeeCreateInput, EmployeeUpdateInput, EmployeeSelfUpdateInput,
   ChangePasswordInput, EmployeeSetupInput, EmployeeMetrics, EmployeeSetupLinkResponse
 } from '../types/employee';
+import { formatUserFriendlyError } from './errorUtils';
 
 export function getApiBaseUrl(): string {
   // In the browser on a deployed host (Render, Vercel, or custom domain):
@@ -120,40 +121,39 @@ async function request<T>(
       }
 
       if (!response.ok) {
-        let errorMessage = `API Error (${response.status}): ${response.statusText || 'Request failed'}`;
-        if ([502, 503, 504].includes(response.status)) {
-          errorMessage = `Backend service is waking up or temporarily unreachable (${response.status}). Please wait a few moments and try again.`;
-        }
+        let extractedDetail: string | null = null;
         try {
           const errText = await response.text();
           try {
             const errData = JSON.parse(errText);
             if (errData && errData.detail) {
               if (Array.isArray(errData.detail)) {
-                errorMessage = errData.detail
+                extractedDetail = errData.detail
                   .map((item: any) => {
                     const msg = item.msg || JSON.stringify(item);
                     return msg.replace(/^Value error,\s*/i, '');
                   })
                   .join('. ');
               } else if (typeof errData.detail === 'string') {
-                errorMessage = errData.detail;
-              } else {
-                errorMessage = JSON.stringify(errData.detail);
+                extractedDetail = errData.detail;
               }
-            } else if (errData && errData.message) {
-              errorMessage = errData.message;
+            } else if (errData && errData.message && typeof errData.message === 'string') {
+              extractedDetail = errData.message;
             }
           } catch {
             if (errText && errText.trim().length > 0 && !errText.includes('<!DOCTYPE') && !errText.includes('<html')) {
-              errorMessage = errText.trim();
+              extractedDetail = errText.trim();
             }
           }
-        } catch (e) {
+        } catch {
           // Ignore read error
         }
 
-        
+        // Format message into clean, human-friendly text
+        const errorMessage = formatUserFriendlyError(
+          extractedDetail || { status: response.status, message: response.statusText }
+        );
+
         if (response.status === 401 && typeof window !== 'undefined') {
           removeAuthToken();
           const currentPath = window.location.pathname;
@@ -189,20 +189,15 @@ async function request<T>(
         continue;
       }
 
-      if (isAbort) {
-        throw new Error(`Connection timed out after ${timeoutMs / 1000}s. The server may be cold-starting; please retry.`);
-      }
-
-      if (isNetwork) {
-        const displayHost = baseUrl || (typeof window !== 'undefined' ? window.location.origin : 'backend');
-        throw new Error(`Unable to reach the server at ${displayHost}. The backend may be cold-starting. Please wait a moment and retry.`);
+      if (isAbort || isNetwork) {
+        throw new Error('Server is waking up. Please try again in a few moments.');
       }
 
       throw netErr;
     }
   }
 
-  throw lastError || new Error('Request failed after retries.');
+  throw lastError ? new Error(formatUserFriendlyError(lastError)) : new Error('Server is waking up. Please try again in a few moments.');
 }
 
 export const api = {

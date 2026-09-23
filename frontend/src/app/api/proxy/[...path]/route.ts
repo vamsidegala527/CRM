@@ -25,6 +25,15 @@ async function handler(request: NextRequest, { params }: { params: { path: strin
     headers.set('origin', url.origin);
   }
 
+  // Ensure real client IP is forwarded so backend rate limiter does not throttle the proxy instance
+  const clientIp = request.headers.get('cf-connecting-ip') || 
+                   request.headers.get('x-forwarded-for') || 
+                   request.headers.get('x-real-ip') || 
+                   (request as any).ip;
+  if (clientIp && !headers.get('x-forwarded-for')) {
+    headers.set('x-forwarded-for', clientIp);
+  }
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 60000);
 
@@ -82,7 +91,7 @@ async function handler(request: NextRequest, { params }: { params: { path: strin
     clearTimeout(timeoutId);
     console.error(`[PROXY ERROR] Unable to reach backend at ${targetUrl}:`, err);
     return NextResponse.json(
-      { detail: `Proxy unable to reach backend service at ${backendBase}: ${err.message}` },
+      { detail: 'Server is waking up. Please try again in a few moments.' },
       { status: 502 }
     );
   }

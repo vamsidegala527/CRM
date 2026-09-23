@@ -19,6 +19,7 @@ import EmployeeDeleteModal from '../components/EmployeeDeleteModal';
 import DeactivateModal from '../components/DeactivateModal';
 import EmployeeSelfService from '../components/EmployeeSelfService';
 import CompanyDetailsModal from '../components/CompanyDetailsModal';
+import ChangePasswordModal from '../components/ChangePasswordModal';
 import ChatbotWidget from '../components/ChatbotWidget';
 
 export default function DashboardPage() {
@@ -28,11 +29,6 @@ export default function DashboardPage() {
   const [authChecking, setAuthChecking] = useState(true);
   const [authElapsed, setAuthElapsed] = useState(0);
   const [authError, setAuthError] = useState<string | null>(null);
-
-  // Email verification state
-  const [isVerifyingEmail, setIsVerifyingEmail] = useState(false);
-  const [showVerifyInput, setShowVerifyInput] = useState(false);
-  const [verifyTokenInput, setVerifyTokenInput] = useState('');
 
   // Notification state
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -73,6 +69,9 @@ export default function DashboardPage() {
 
   // Company Details Modal State
   const [isCompanyModalOpen, setIsCompanyModalOpen] = useState(false);
+
+  // Change Password Modal State
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
 
   // Hydration safety & restore state from sessionStorage
   useEffect(() => {
@@ -137,7 +136,7 @@ export default function DashboardPage() {
       if (err.status === 401 || err.message?.includes('401') || err.message?.includes('credentials')) {
         router.push('/login');
       } else {
-        setAuthError(err.message || 'Connection timed out. The backend server might be performing a cold start.');
+        setAuthError(err.message || 'Server is waking up. Please try again in a few moments.');
       }
       setAuthChecking(false);
     }
@@ -152,41 +151,6 @@ export default function DashboardPage() {
     }
     checkAuth();
   }, [mounted, checkAuth, router]);
-
-  // Email verification handlers for Admin
-  const handleResendVerification = async () => {
-    if (!currentUser?.email) return;
-    try {
-      setIsVerifyingEmail(true);
-      const res = await api.resendVerification(currentUser.email);
-      showNotification(res.message || 'Verification email sent! Please check your inbox.');
-    } catch (err: any) {
-      showNotification(err.message || 'Failed to resend verification token', 'error');
-    } finally {
-      setIsVerifyingEmail(false);
-    }
-  };
-
-  const handleVerifyEmail = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!verifyTokenInput.trim()) return;
-    try {
-      setIsVerifyingEmail(true);
-      const res = await api.verifyEmail(verifyTokenInput.trim());
-      showNotification(res.message || 'Email verified successfully!');
-      if (currentUser) {
-        const updated = { ...currentUser, is_verified: true, first_login: false };
-        setCurrentUser(updated);
-        setStoredUser(updated);
-      }
-      setShowVerifyInput(false);
-      setVerifyTokenInput('');
-    } catch (err: any) {
-      showNotification(err.message || 'Verification token is invalid or expired', 'error');
-    } finally {
-      setIsVerifyingEmail(false);
-    }
-  };
 
   const handleLogout = async () => {
     try {
@@ -221,7 +185,7 @@ export default function DashboardPage() {
       });
       setEmployees(emps);
     } catch (err: any) {
-      showNotification(err.message || 'Error fetching employees from backend', 'error');
+      showNotification(err.message || 'Unable to load employees. Please try again.', 'error');
     } finally {
       setIsEmployeeLoading(false);
     }
@@ -311,7 +275,7 @@ export default function DashboardPage() {
         if (newEmp.setup_url && typeof navigator !== 'undefined' && navigator.clipboard) {
           try {
             await navigator.clipboard.writeText(newEmp.setup_url);
-          } catch (_) {}
+          } catch (_) { }
         }
         showNotification(
           newEmp.setup_url
@@ -357,17 +321,17 @@ export default function DashboardPage() {
       if (res.setup_url && typeof navigator !== 'undefined' && navigator.clipboard) {
         try {
           await navigator.clipboard.writeText(res.setup_url);
-        } catch (_) {}
+        } catch (_) { }
       }
       if (res.email_delivered === false) {
-        showNotification(res.message || `Setup link copied to clipboard! (Email delivery unavailable on host).`, 'info');
+        showNotification(res.message || `Setup link copied to clipboard!`, 'info');
       } else {
-        showNotification(res.message || `Setup login email sent and link copied to clipboard!`);
+        showNotification(res.message || `Setup link copied to clipboard and email sent!`);
       }
       fetchEmployees();
       fetchEmployeeMetrics();
     } catch (err: any) {
-      showNotification(err.message || 'Failed to send login setup email.', 'error');
+      showNotification(err.message || 'Unable to send setup email.', 'error');
     } finally {
       setSendingEmailId(null);
     }
@@ -473,96 +437,14 @@ export default function DashboardPage() {
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-main, #0B0F19)' }}>
-      <Navbar user={currentUser} onLogout={handleLogout} />
+      <Navbar
+        user={currentUser}
+        onLogout={handleLogout}
+        onOpenCompanyProfile={() => setIsCompanyModalOpen(true)}
+        onChangePassword={() => setIsPasswordModalOpen(true)}
+      />
 
       <main style={{ flex: 1, padding: '2rem 1.5rem 8rem 1.5rem', maxWidth: '1440px', width: '100%', margin: '0 auto' }}>
-        {/* Email Verification Banner */}
-        {currentUser && !currentUser.is_verified && (
-          <div style={{
-            background: 'linear-gradient(135deg, rgba(234, 179, 8, 0.15) 0%, rgba(202, 138, 4, 0.1) 100%)',
-            border: '1px solid rgba(234, 179, 8, 0.35)',
-            borderRadius: 'var(--radius-md)',
-            padding: '1rem 1.25rem',
-            marginBottom: '1.5rem',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '1rem',
-            flexWrap: 'wrap'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <span style={{ fontSize: '1.25rem' }}>⚠️</span>
-              <span style={{ fontSize: '0.9rem', color: '#FEF08A' }}>
-                Your email address <strong>{currentUser.email}</strong> is unverified.
-              </span>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              {showVerifyInput ? (
-                <form onSubmit={handleVerifyEmail} style={{ display: 'flex', gap: '0.35rem' }}>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    maxLength={6}
-                    placeholder="6-digit code"
-                    value={verifyTokenInput}
-                    onChange={(e) => setVerifyTokenInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    style={{
-                      padding: '0.3rem 0.65rem',
-                      fontSize: '0.88rem',
-                      fontWeight: 600,
-                      letterSpacing: '3px',
-                      textAlign: 'center',
-                      fontFamily: 'monospace',
-                      background: 'rgba(0, 0, 0, 0.4)',
-                      border: '1px solid rgba(234, 179, 8, 0.4)',
-                      borderRadius: '4px',
-                      color: '#FFF',
-                      width: '130px'
-                    }}
-                    required
-                  />
-                  <button
-                    type="submit"
-                    disabled={isVerifyingEmail || verifyTokenInput.trim().length !== 6}
-                    className="btn btn-primary"
-                    style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem' }}
-                  >
-                    Confirm
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowVerifyInput(false)}
-                    className="btn btn-secondary"
-                    style={{ fontSize: '0.75rem', padding: '0.3rem 0.5rem' }}
-                  >
-                    Cancel
-                  </button>
-                </form>
-              ) : (
-                <>
-                  <button
-                    onClick={() => setShowVerifyInput(true)}
-                    className="btn btn-secondary"
-                    style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem', borderColor: 'rgba(234, 179, 8, 0.4)', color: '#FDE047' }}
-                  >
-                    Enter Code
-                  </button>
-                  <button
-                    onClick={handleResendVerification}
-                    disabled={isVerifyingEmail}
-                    className="btn btn-primary"
-                    style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem', background: 'rgba(234, 179, 8, 0.25)', border: '1px solid rgba(234, 179, 8, 0.5)', color: '#FEF08A' }}
-                  >
-                    {isVerifyingEmail ? 'Sending...' : 'Resend Code'}
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        )}
-
         {/* Global Notification Banner */}
         {notification && (
           <div style={{
@@ -594,7 +476,6 @@ export default function DashboardPage() {
               setStoredUser(u);
             }}
             showNotification={showNotification}
-            onViewCompany={() => setIsCompanyModalOpen(true)}
           />
         ) : (
           /* ROLE 2: HR/ADMIN PORTAL DASHBOARD */
@@ -619,29 +500,11 @@ export default function DashboardPage() {
                   alignItems: 'center',
                   gap: '0.5rem'
                 }}>
-                  <span>👥</span> HR & Employee Directory
+                  <span>👥</span> Dashboard
                 </h1>
-                <p style={{ fontSize: '0.9rem', color: 'var(--text-subtle)', margin: '0.35rem 0 0' }}>
-                  Manage organization personnel, department rosters, onboarding statuses, and access permissions.
-                </p>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  onClick={() => setIsCompanyModalOpen(true)}
-                  className="btn btn-secondary"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    padding: '0.65rem 1.25rem',
-                    fontWeight: 600,
-                    fontSize: '0.92rem',
-                  }}
-                >
-                  <span>🏢</span> Company Profile
-                </button>
                 <button
                   type="button"
                   onClick={handleOpenAddEmployee}
@@ -844,180 +707,178 @@ export default function DashboardPage() {
               copyingSetupId={copyingSetupId}
             />
 
-            {/* Pagination Controls */}
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginTop: '1.75rem',
-              padding: '1.15rem 1.5rem',
-              background: 'rgba(15, 23, 42, 0.85)',
-              backdropFilter: 'blur(12px)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              borderRadius: 'var(--radius-lg, 12px)',
-              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.25)',
-              flexWrap: 'wrap',
-              gap: '1.25rem',
-              fontSize: '0.875rem',
-              color: 'var(--text-subtle)'
-            }}>
-              {/* Left: Record Count and Page Size Selector */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', flexWrap: 'wrap' }}>
-                <div>
-                  {totalEmployeesCount > 0 ? (
+            {/* Pagination Controls - Completely hidden if employees <= 15, only rendered when employees > 15 */}
+            {totalEmployeesCount > 15 && (
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginTop: '1.75rem',
+                padding: '1.15rem 1.5rem',
+                background: 'rgba(15, 23, 42, 0.85)',
+                backdropFilter: 'blur(12px)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: 'var(--radius-lg, 12px)',
+                boxShadow: '0 4px 20px rgba(0, 0, 0, 0.25)',
+                flexWrap: 'wrap',
+                gap: '1.25rem',
+                fontSize: '0.875rem',
+                color: 'var(--text-subtle)'
+              }}>
+                {/* Left: Record Count and Page Size Selector */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', flexWrap: 'wrap' }}>
+                  <div>
                     <span>
                       Showing <strong style={{ color: '#F1F5F9' }}>{(page - 1) * limit + 1}</strong> to{' '}
                       <strong style={{ color: '#F1F5F9' }}>{Math.min((page - 1) * limit + employees.length, totalEmployeesCount)}</strong> of{' '}
                       <strong style={{ color: '#F1F5F9' }}>{totalEmployeesCount}</strong> employees
                     </span>
-                  ) : (
-                    <span>Showing <strong>0</strong> employees</span>
-                  )}
-                </div>
+                  </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-                  <label htmlFor="limit-select" style={{ color: 'var(--text-muted)' }}>Per page:</label>
-                  <select
-                    id="limit-select"
-                    value={limit}
-                    onChange={(e) => {
-                      setLimit(Number(e.target.value));
-                      setPage(1);
-                    }}
-                    style={{
-                      background: 'rgba(30, 41, 59, 0.85)',
-                      color: '#F1F5F9',
-                      border: '1px solid rgba(255, 255, 255, 0.15)',
-                      borderRadius: '6px',
-                      padding: '0.3rem 0.6rem',
-                      fontSize: '0.8rem',
-                      cursor: 'pointer',
-                      outline: 'none'
-                    }}
-                  >
-                    <option value={10}>10</option>
-                    <option value={15}>15</option>
-                    <option value={25}>25</option>
-                    <option value={50}>50</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Center / Right: Complete Page Navigation Options with Clearance from Floating Widgets */}
-              <div style={{
-                display: 'flex',
-                gap: '0.4rem',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                paddingRight: '120px' // Guarantees the controls never sit under the floating AI button
-              }}>
-                {/* First Page */}
-                <button
-                  type="button"
-                  disabled={page <= 1 || isEmployeeLoading}
-                  onClick={() => setPage(1)}
-                  title="Go to First Page"
-                  className="btn btn-secondary"
-                  style={{
-                    fontSize: '0.8rem',
-                    padding: '0.35rem 0.65rem',
-                    opacity: page <= 1 ? 0.35 : 1,
-                    cursor: page <= 1 ? 'not-allowed' : 'pointer'
-                  }}
-                >
-                  « First
-                </button>
-
-                {/* Previous Page */}
-                <button
-                  type="button"
-                  disabled={page <= 1 || isEmployeeLoading}
-                  onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-                  title="Previous Page"
-                  className="btn btn-secondary"
-                  style={{
-                    fontSize: '0.8rem',
-                    padding: '0.35rem 0.75rem',
-                    opacity: page <= 1 ? 0.35 : 1,
-                    cursor: page <= 1 ? 'not-allowed' : 'pointer'
-                  }}
-                >
-                  ‹ Prev
-                </button>
-
-                {/* Page Number Buttons */}
-                {pageNumbers.map((p, idx) => {
-                  if (p === '...') {
-                    return (
-                      <span key={`ellipsis-${idx}`} style={{ padding: '0 0.35rem', color: 'var(--text-muted)' }}>
-                        ...
-                      </span>
-                    );
-                  }
-                  const isCurrent = p === page;
-                  return (
-                    <button
-                      key={`page-${p}`}
-                      type="button"
-                      disabled={isEmployeeLoading}
-                      onClick={() => setPage(Number(p))}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+                    <label htmlFor="limit-select" style={{ color: 'var(--text-muted)' }}>Per page:</label>
+                    <select
+                      id="limit-select"
+                      value={limit}
+                      onChange={(e) => {
+                        setLimit(Number(e.target.value));
+                        setPage(1);
+                      }}
                       style={{
-                        minWidth: '34px',
-                        height: '32px',
-                        borderRadius: '8px',
-                        border: isCurrent ? '1px solid #818CF8' : '1px solid rgba(255, 255, 255, 0.1)',
-                        background: isCurrent ? 'linear-gradient(135deg, #6366F1 0%, #4F46E5 100%)' : 'rgba(30, 41, 59, 0.6)',
-                        color: isCurrent ? '#FFFFFF' : 'var(--text-main, #F1F5F9)',
-                        fontWeight: isCurrent ? 700 : 500,
-                        fontSize: '0.85rem',
+                        background: 'rgba(30, 41, 59, 0.85)',
+                        color: '#F1F5F9',
+                        border: '1px solid rgba(255, 255, 255, 0.15)',
+                        borderRadius: '6px',
+                        padding: '0.3rem 0.6rem',
+                        fontSize: '0.8rem',
                         cursor: 'pointer',
-                        boxShadow: isCurrent ? '0 0 12px rgba(99, 102, 241, 0.5)' : 'none',
-                        transition: 'all 0.2s ease',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
+                        outline: 'none'
                       }}
                     >
-                      {p}
-                    </button>
-                  );
-                })}
+                      <option value={10}>10</option>
+                      <option value={15}>15</option>
+                      <option value={25}>25</option>
+                      <option value={50}>50</option>
+                    </select>
+                  </div>
+                </div>
 
-                {/* Next Page */}
-                <button
-                  type="button"
-                  disabled={page >= totalPages || employees.length < limit || isEmployeeLoading}
-                  onClick={() => setPage((prev) => prev + 1)}
-                  title="Next Page"
-                  className="btn btn-secondary"
-                  style={{
-                    fontSize: '0.8rem',
-                    padding: '0.35rem 0.75rem',
-                    opacity: (page >= totalPages || employees.length < limit) ? 0.35 : 1,
-                    cursor: (page >= totalPages || employees.length < limit) ? 'not-allowed' : 'pointer'
-                  }}
-                >
-                  Next ›
-                </button>
+                {/* Right: Page Navigation Options */}
+                <div style={{
+                  display: 'flex',
+                  gap: '0.4rem',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  paddingRight: '120px' // Guarantees the controls never sit under the floating AI button
+                }}>
+                  {/* First Page */}
+                  <button
+                    type="button"
+                    disabled={page <= 1 || isEmployeeLoading}
+                    onClick={() => setPage(1)}
+                    title="Go to First Page"
+                    className="btn btn-secondary"
+                    style={{
+                      fontSize: '0.8rem',
+                      padding: '0.35rem 0.65rem',
+                      opacity: page <= 1 ? 0.35 : 1,
+                      cursor: page <= 1 ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    « First
+                  </button>
 
-                {/* Last Page */}
-                <button
-                  type="button"
-                  disabled={page >= totalPages || employees.length < limit || isEmployeeLoading}
-                  onClick={() => setPage(totalPages)}
-                  title="Go to Last Page"
-                  className="btn btn-secondary"
-                  style={{
-                    fontSize: '0.8rem',
-                    padding: '0.35rem 0.65rem',
-                    opacity: (page >= totalPages || employees.length < limit) ? 0.35 : 1,
-                    cursor: (page >= totalPages || employees.length < limit) ? 'not-allowed' : 'pointer'
-                  }}
-                >
-                  Last »
-                </button>
+                  {/* Previous Page */}
+                  <button
+                    type="button"
+                    disabled={page <= 1 || isEmployeeLoading}
+                    onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                    title="Previous Page"
+                    className="btn btn-secondary"
+                    style={{
+                      fontSize: '0.8rem',
+                      padding: '0.35rem 0.75rem',
+                      opacity: page <= 1 ? 0.35 : 1,
+                      cursor: page <= 1 ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    ‹ Prev
+                  </button>
+
+                  {/* Page Number Buttons */}
+                  {pageNumbers.map((p, idx) => {
+                    if (p === '...') {
+                      return (
+                        <span key={`ellipsis-${idx}`} style={{ padding: '0 0.35rem', color: 'var(--text-muted)' }}>
+                          ...
+                        </span>
+                      );
+                    }
+                    const isCurrent = p === page;
+                    return (
+                      <button
+                        key={`page-${p}`}
+                        type="button"
+                        disabled={isEmployeeLoading}
+                        onClick={() => setPage(Number(p))}
+                        style={{
+                          minWidth: '34px',
+                          height: '32px',
+                          borderRadius: '8px',
+                          border: isCurrent ? '1px solid #818CF8' : '1px solid rgba(255, 255, 255, 0.1)',
+                          background: isCurrent ? 'linear-gradient(135deg, #6366F1 0%, #4F46E5 100%)' : 'rgba(30, 41, 59, 0.6)',
+                          color: isCurrent ? '#FFFFFF' : 'var(--text-main, #F1F5F9)',
+                          fontWeight: isCurrent ? 700 : 500,
+                          fontSize: '0.85rem',
+                          cursor: 'pointer',
+                          boxShadow: isCurrent ? '0 0 12px rgba(99, 102, 241, 0.5)' : 'none',
+                          transition: 'all 0.2s ease',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                      >
+                        {p}
+                      </button>
+                    );
+                  })}
+
+                  {/* Next Page */}
+                  <button
+                    type="button"
+                    disabled={page >= totalPages || employees.length < limit || isEmployeeLoading}
+                    onClick={() => setPage((prev) => prev + 1)}
+                    title="Next Page"
+                    className="btn btn-secondary"
+                    style={{
+                      fontSize: '0.8rem',
+                      padding: '0.35rem 0.75rem',
+                      opacity: (page >= totalPages || employees.length < limit) ? 0.35 : 1,
+                      cursor: (page >= totalPages || employees.length < limit) ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    Next ›
+                  </button>
+
+                  {/* Last Page */}
+                  <button
+                    type="button"
+                    disabled={page >= totalPages || employees.length < limit || isEmployeeLoading}
+                    onClick={() => setPage(totalPages)}
+                    title="Go to Last Page"
+                    className="btn btn-secondary"
+                    style={{
+                      fontSize: '0.8rem',
+                      padding: '0.35rem 0.65rem',
+                      opacity: (page >= totalPages || employees.length < limit) ? 0.35 : 1,
+                      cursor: (page >= totalPages || employees.length < limit) ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    Last »
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Modals */}
             <EmployeeModal
@@ -1069,6 +930,13 @@ export default function DashboardPage() {
         isOpen={isCompanyModalOpen}
         onClose={() => setIsCompanyModalOpen(false)}
         isAdmin={currentUser?.role === 'admin'}
+        showNotification={showNotification}
+      />
+
+      {/* Change Password Modal */}
+      <ChangePasswordModal
+        isOpen={isPasswordModalOpen}
+        onClose={() => setIsPasswordModalOpen(false)}
         showNotification={showNotification}
       />
 

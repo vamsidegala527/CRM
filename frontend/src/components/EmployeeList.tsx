@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { User } from '../types/employee';
+import { formatPhoneNumberDisplay } from '../lib/phoneUtils';
 
 interface EmployeeListProps {
   employees: User[];
@@ -147,7 +148,7 @@ export default function EmployeeList({
 
                 {/* Phone */}
                 <td style={{ padding: '1rem', color: 'var(--text-main)' }}>
-                  {emp.phone || '—'}
+                  {formatPhoneNumberDisplay(emp.phone)}
                 </td>
 
                 {/* Company */}

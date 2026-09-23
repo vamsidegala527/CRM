@@ -40,6 +40,13 @@ def sync_db_schema():
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS company VARCHAR;"))
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT;"))
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS notes TEXT;"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS emergency_contact VARCHAR;"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS experience_years VARCHAR;"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS previous_companies TEXT;"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS previous_roles TEXT;"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS skills TEXT;"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS education TEXT;"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS certifications TEXT;"))
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS setup_token_hash VARCHAR;"))
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS setup_token_expires TIMESTAMP;"))
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_token VARCHAR;"))
@@ -58,6 +65,18 @@ def sync_db_schema():
             conn.execute(text("ALTER TABLE users ALTER COLUMN role SET DEFAULT 'admin';"))
             conn.execute(text("ALTER TABLE users ALTER COLUMN is_setup_complete SET DEFAULT FALSE;"))
             conn.execute(text("ALTER TABLE users ALTER COLUMN is_setup_complete SET NOT NULL;"))
+
+            # Company Details schema sync
+            conn.execute(text("ALTER TABLE company_details ADD COLUMN IF NOT EXISTS work_model VARCHAR;"))
+            conn.execute(text("ALTER TABLE company_details ADD COLUMN IF NOT EXISTS working_hours VARCHAR;"))
+            conn.execute(text("ALTER TABLE company_details ADD COLUMN IF NOT EXISTS leave_policy_summary TEXT;"))
+            conn.execute(text("ALTER TABLE company_details ADD COLUMN IF NOT EXISTS benefits_summary TEXT;"))
+            conn.execute(text("ALTER TABLE company_details ADD COLUMN IF NOT EXISTS workplace_guidelines TEXT;"))
+            conn.execute(text("ALTER TABLE company_details ADD COLUMN IF NOT EXISTS executive_leadership TEXT;"))
+            conn.execute(text("ALTER TABLE company_details ADD COLUMN IF NOT EXISTS hr_contact_email VARCHAR;"))
+            conn.execute(text("ALTER TABLE company_details ADD COLUMN IF NOT EXISTS it_support_email VARCHAR;"))
+            conn.execute(text("ALTER TABLE company_details ADD COLUMN IF NOT EXISTS finance_email VARCHAR;"))
+            conn.execute(text("ALTER TABLE company_details ADD COLUMN IF NOT EXISTS emergency_contact VARCHAR;"))
 
             # Safely drop legacy customers table if present
             conn.execute(text("DROP TABLE IF EXISTS customers CASCADE;"))

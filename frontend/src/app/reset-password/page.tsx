@@ -4,6 +4,7 @@ import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '../../lib/api';
+import { formatUserFriendlyError } from '../../lib/errorUtils';
 import { isPasswordValid, PASSWORD_ERROR_MESSAGE } from '../../lib/validation';
 import PasswordInput from '../../components/PasswordInput';
 
@@ -53,7 +54,7 @@ function ResetPasswordForm() {
     setFormSubmitted(true);
 
     if (!token.trim()) {
-      setError('Password reset link is missing a valid security token.');
+      setError('Password reset link is invalid or missing.');
       return;
     }
 
@@ -76,9 +77,9 @@ function ResetPasswordForm() {
     try {
       const res = await api.resetPassword(token.trim(), newPassword, confirmPassword);
       setIsSuccess(true);
-      setSuccessMsg(res.message || 'Password has been successfully updated. You may now log in.');
+      setSuccessMsg(res.message || 'Password updated successfully! You can now log in.');
     } catch (err: any) {
-      setError(err.message || 'Unable to reset password. The link may be expired or already used.');
+      setError(formatUserFriendlyError(err, 'Unable to reset password. The link may have expired.'));
     } finally {
       setLoading(false);
     }

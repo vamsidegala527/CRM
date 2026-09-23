@@ -4,8 +4,10 @@ import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '../../lib/api';
+import { formatUserFriendlyError } from '../../lib/errorUtils';
 import { isPasswordValid, PASSWORD_ERROR_MESSAGE } from '../../lib/validation';
 import PasswordInput from '../../components/PasswordInput';
+import { validateEmail, EMAIL_ERROR_MESSAGE } from '../../lib/validators/emailValidator';
 
 function SetupEmployeeContent() {
   const router = useRouter();
@@ -35,12 +37,32 @@ function SetupEmployeeContent() {
     setEmail(decodedEmail);
 
     if (!decodedToken) {
-      setError('Invalid or missing setup link. Please click the link in your invitation email or contact your administrator for an active setup link.');
+      setError('Setup link is invalid or missing. Please contact your administrator.');
     }
   }, [searchParams]);
 
   const [passwordTouched, setPasswordTouched] = useState(false);
   const [formSubmitted, setFormSubmitted] = useState(false);
+  const [emailTouched, setEmailTouched] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
+
+  const handleEmailBlur = () => {
+    setEmailTouched(true);
+    if (!email.trim()) {
+      setEmailError(EMAIL_ERROR_MESSAGE);
+    } else {
+      const res = validateEmail(email);
+      setEmailError(res.isValid ? null : EMAIL_ERROR_MESSAGE);
+    }
+  };
+
+  const handleEmailChange = (val: string) => {
+    setEmail(val);
+    if (emailTouched) {
+      const res = validateEmail(val);
+      setEmailError(res.isValid ? null : EMAIL_ERROR_MESSAGE);
+    }
+  };
 
   const isPasswordCriteriaMet = isPasswordValid(password);
   const showPasswordError = (formSubmitted && !isPasswordCriteriaMet) || (passwordTouched && password.length > 0 && !isPasswordCriteriaMet);
@@ -56,12 +78,14 @@ function SetupEmployeeContent() {
     const cleanEmail = email.trim();
 
     if (!cleanToken) {
-      setError('Setup invitation token is missing. Please use the link provided in your newest email.');
+      setError('Setup link is missing. Please use the link from your email.');
       return;
     }
 
-    if (!cleanEmail) {
-      setError('Please provide your employee email address.');
+    const emailRes = validateEmail(cleanEmail);
+    if (!emailRes.isValid) {
+      setEmailTouched(true);
+      setEmailError(EMAIL_ERROR_MESSAGE);
       return;
     }
 
@@ -84,17 +108,17 @@ function SetupEmployeeContent() {
     try {
       const response = await api.setupEmployeeAccount({
         token: cleanToken,
-        email: cleanEmail,
+        email: emailRes.sanitizedEmail,
         new_password: password,
         confirm_password: confirmPassword,
       });
 
-      setSuccess(response.message || 'Your account has been set up successfully! Redirecting to login...');
+      setSuccess(response.message || 'Account setup successful! Redirecting to login...');
       setTimeout(() => {
         router.push('/');
       }, 2500);
     } catch (err: any) {
-      setError(err.message || 'Failed to complete employee account setup. The link may have expired.');
+      setError(formatUserFriendlyError(err, 'Unable to set up account. The link may have expired.'));
     } finally {
       setLoading(false);
     }
@@ -214,7 +238,8 @@ function SetupEmployeeContent() {
             <input
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => handleEmailChange(e.target.value)}
+              onBlur={handleEmailBlur}
               required
               readOnly={Boolean(searchParams.get('email'))}
               placeholder="name@company.com"
@@ -222,7 +247,7 @@ function SetupEmployeeContent() {
                 width: '100%',
                 padding: '0.75rem 1rem',
                 background: searchParams.get('email') ? 'rgba(255, 255, 255, 0.03)' : 'rgba(255, 255, 255, 0.06)',
-                border: '1px solid rgba(255, 255, 255, 0.12)',
+                border: emailError ? '1px solid var(--accent-rose, #F43F5E)' : '1px solid rgba(255, 255, 255, 0.12)',
                 borderRadius: '10px',
                 color: searchParams.get('email') ? '#94A3B8' : '#FFFFFF',
                 fontSize: '0.9rem',
@@ -230,6 +255,11 @@ function SetupEmployeeContent() {
                 cursor: searchParams.get('email') ? 'not-allowed' : 'text'
               }}
             />
+            {emailError && (
+              <span style={{ display: 'block', fontSize: '0.78rem', color: '#F43F5E', marginTop: '0.35rem' }}>
+                {emailError}
+              </span>
+            )}
           </div>
 
           {/* New Password */}

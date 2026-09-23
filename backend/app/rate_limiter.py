@@ -1,5 +1,6 @@
 import time
 from typing import Dict, List, Tuple
+# pyrefly: ignore [missing-import]
 from fastapi import Request, HTTPException, status
 
 class RateLimiter:
@@ -10,8 +11,8 @@ class RateLimiter:
     def __init__(self):
         # Maps key -> list of timestamp floats
         self._requests: Dict[str, List[float]] = {}
-        # Maps identifier (IP or email) -> (failed_count, lockout_until_timestamp)
-        self._failed_attempts: Dict[str, Tuple[int, float]] = {}
+        # Maps identifier (e.g. "email:user@domain.com") -> (list of recent failed timestamps, lockout_until_timestamp)
+        self._failed_attempts: Dict[str, Tuple[List[float], float]] = {}
 
     def _clean_old_entries(self, key: str, window_seconds: int, now: float):
         if key in self._requests:
@@ -20,7 +21,7 @@ class RateLimiter:
             if not self._requests[key]:
                 del self._requests[key]
 
-    def check_rate_limit(self, key: str, max_requests: int = 10, window_seconds: int = 60, action: str = "requests"):
+    def check_rate_limit(self, key: str, max_requests: int = 60, window_seconds: int = 60, action: str = "requests"):
         if "testclient" in key:
             return
         now = time.time()
@@ -31,7 +32,7 @@ class RateLimiter:
             retry_after = int(window_seconds - (now - timestamps[0])) if timestamps else window_seconds
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Rate limit exceeded for {action}. Too many requests. Please retry after {max(1, retry_after)} seconds.",
+                detail=f"Too many requests. Please retry after {max(1, retry_after)} seconds.",
                 headers={"Retry-After": str(max(1, retry_after))}
             )
         
@@ -44,33 +45,37 @@ class RateLimiter:
             return
         now = time.time()
         if identifier in self._failed_attempts:
-            count, lockout_until = self._failed_attempts[identifier]
+            failed_times, lockout_until = self._failed_attempts[identifier]
             if now < lockout_until:
-                remaining_secs = int(lockout_until - now)
+                remaining_secs = max(1, int(lockout_until - now))
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     detail=f"Account temporarily locked due to repeated failed login attempts. Please try again in {remaining_secs} seconds.",
                     headers={"Retry-After": str(remaining_secs)}
                 )
-            elif count >= 5 and now >= lockout_until:
+            elif now >= lockout_until and lockout_until > 0:
                 # Lockout period expired, reset counter
                 del self._failed_attempts[identifier]
 
-    def record_failure(self, identifier: str, max_failures: int = 5, lockout_seconds: int = 900):
+    def record_failure(self, identifier: str, max_failures: int = 8, lockout_seconds: int = 300, window_seconds: int = 600):
         """
-        Record a failed authentication attempt. 5 consecutive failures triggers a 15-minute (900s) lockout.
+        Record a failed authentication attempt with a sliding window (default 10 mins).
+        Only triggers a temporary lockout (default 5 mins) if max_failures is reached within the window.
         """
         now = time.time()
-        count, lockout_until = self._failed_attempts.get(identifier, (0, 0.0))
+        failed_times, lockout_until = self._failed_attempts.get(identifier, ([], 0.0))
         if now < lockout_until:
             return  # Already locked out
 
-        new_count = count + 1
-        if new_count >= max_failures:
+        cutoff = now - window_seconds
+        recent_failures = [t for t in failed_times if t > cutoff]
+        recent_failures.append(now)
+
+        if len(recent_failures) >= max_failures:
             lockout_until = now + lockout_seconds
-            self._failed_attempts[identifier] = (new_count, lockout_until)
+            self._failed_attempts[identifier] = (recent_failures, lockout_until)
         else:
-            self._failed_attempts[identifier] = (new_count, 0.0)
+            self._failed_attempts[identifier] = (recent_failures, 0.0)
 
     def record_success(self, identifier: str):
         """Reset failed attempt counters upon successful authentication."""
@@ -81,11 +86,28 @@ class RateLimiter:
 limiter = RateLimiter()
 
 def get_client_ip(request: Request) -> str:
-    """Extract real client IP considering reverse proxy headers."""
+    """Extract real client IP considering reverse proxy and CDN headers."""
+    # 1. Cloudflare / Render CDN edge connecting IP
+    cf_ip = request.headers.get("CF-Connecting-IP")
+    if cf_ip and cf_ip.strip():
+        return cf_ip.strip()
+
+    # 2. True-Client-IP header (Akamai / Cloudflare Enterprise)
+    true_ip = request.headers.get("True-Client-IP")
+    if true_ip and true_ip.strip():
+        return true_ip.strip()
+
+    # 3. Standard X-Forwarded-For header (first entry is original client)
     forwarded_for = request.headers.get("X-Forwarded-For")
     if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
+        ips = [ip.strip() for ip in forwarded_for.split(",") if ip.strip()]
+        if ips:
+            return ips[0]
+
+    # 4. Standard X-Real-IP header
     real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
+    if real_ip and real_ip.strip():
         return real_ip.strip()
+
+    # 5. Direct client host fallback
     return request.client.host if request.client else "127.0.0.1"

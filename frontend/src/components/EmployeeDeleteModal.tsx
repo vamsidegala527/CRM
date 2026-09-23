@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { User } from '../types/employee';
+import { formatUserFriendlyError } from '../lib/errorUtils';
 
 interface EmployeeDeleteModalProps {
   isOpen: boolean;
@@ -44,7 +45,7 @@ export default function EmployeeDeleteModal({
       await onConfirm(employee, deleteMode === 'permanent', deleteMode === 'permanent' ? isConfirmed : false);
       onClose();
     } catch (err: any) {
-      setErrorMessage(err.message || 'Operation failed. Please try again.');
+      setErrorMessage(formatUserFriendlyError(err, 'Action failed. Please try again.'));
     } finally {
       setIsProcessing(false);
     }

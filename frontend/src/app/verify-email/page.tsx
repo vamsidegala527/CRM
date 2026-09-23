@@ -4,6 +4,8 @@ import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '../../lib/api';
+import { formatUserFriendlyError } from '../../lib/errorUtils';
+import { validateEmail, EMAIL_ERROR_MESSAGE } from '../../lib/validators/emailValidator';
 
 function VerifyEmailContent() {
   const router = useRouter();
@@ -31,6 +33,26 @@ function VerifyEmailContent() {
   const [isResending, setIsResending] = useState(false);
   const [resendStatusMsg, setResendStatusMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [resendEmailTouched, setResendEmailTouched] = useState(false);
+  const [resendEmailError, setResendEmailError] = useState<string | null>(null);
+
+  const handleResendEmailBlur = () => {
+    setResendEmailTouched(true);
+    if (!resendEmail.trim()) {
+      setResendEmailError(EMAIL_ERROR_MESSAGE);
+    } else {
+      const res = validateEmail(resendEmail);
+      setResendEmailError(res.isValid ? null : EMAIL_ERROR_MESSAGE);
+    }
+  };
+
+  const handleResendEmailChange = (val: string) => {
+    setResendEmail(val);
+    if (resendEmailTouched) {
+      const res = validateEmail(val);
+      setResendEmailError(res.isValid ? null : EMAIL_ERROR_MESSAGE);
+    }
+  };
 
   // Check login status in background for context-aware CTA button
   useEffect(() => {
@@ -73,7 +95,7 @@ function VerifyEmailContent() {
     } catch (err: any) {
       setStatus('error');
       setErrorMessage(
-        err.message || 'This verification link is invalid, expired, or has already been used.'
+        formatUserFriendlyError(err, 'This verification code is invalid or has expired.')
       );
     }
   };
@@ -121,8 +143,11 @@ function VerifyEmailContent() {
   const handleResend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (resendCooldown > 0) return;
-    if (!resendEmail.trim()) {
-      setResendStatusMsg({ text: 'Please enter your email address.', isError: true });
+
+    const emailRes = validateEmail(resendEmail);
+    if (!emailRes.isValid) {
+      setResendEmailTouched(true);
+      setResendEmailError(EMAIL_ERROR_MESSAGE);
       return;
     }
 
@@ -130,9 +155,9 @@ function VerifyEmailContent() {
     setResendStatusMsg(null);
 
     try {
-      const res = await api.resendVerification(resendEmail.trim());
+      const res = await api.resendVerification(emailRes.sanitizedEmail);
       setResendStatusMsg({
-        text: res.message || `A fresh verification link has been sent to ${resendEmail}.`,
+        text: res.message || `A fresh verification link has been sent to ${emailRes.sanitizedEmail}.`,
         isError: false
       });
       setResendCooldown(60);
@@ -144,7 +169,7 @@ function VerifyEmailContent() {
       }
       setResendCooldown(cooldown);
       setResendStatusMsg({
-        text: err.message || 'Unable to resend verification email. Please try again later.',
+        text: formatUserFriendlyError(err, 'Unable to send verification code. Please try again later.'),
         isError: true
       });
     } finally {
@@ -316,18 +341,24 @@ function VerifyEmailContent() {
                 type="email"
                 placeholder="Enter your registered email"
                 value={resendEmail}
-                onChange={(e) => setResendEmail(e.target.value)}
+                onChange={(e) => handleResendEmailChange(e.target.value)}
+                onBlur={handleResendEmailBlur}
                 required
                 style={{
                   width: '100%',
                   padding: '0.65rem 0.85rem',
                   fontSize: '0.88rem',
                   background: 'rgba(0,0,0,0.3)',
-                  border: '1px solid var(--border-color)',
+                  border: resendEmailError ? '1px solid var(--accent-rose, #F43F5E)' : '1px solid var(--border-color)',
                   borderRadius: 'var(--radius-sm)',
                   color: '#FFF'
                 }}
               />
+              {resendEmailError && (
+                <span style={{ display: 'block', fontSize: '0.78rem', color: '#F43F5E', marginTop: '0.2rem' }}>
+                  {resendEmailError}
+                </span>
+              )}
               <button
                 type="submit"
                 disabled={isResending || resendCooldown > 0}

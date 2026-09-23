@@ -93,7 +93,7 @@ def register_user(
     db: Session = Depends(get_db)
 ):
     client_ip = get_client_ip(request)
-    limiter.check_rate_limit(f"register_ip:{client_ip}", max_requests=10, window_seconds=60, action="registration")
+    limiter.check_rate_limit(f"register_ip:{client_ip}", max_requests=30, window_seconds=60, action="registration")
 
     email_clean = user_in.email.strip().lower()
     
@@ -151,7 +151,7 @@ def register_user(
 def verify_email(request: Request, payload: VerifyEmailRequest, db: Session = Depends(get_db)):
     """Verifies a user's email address using a valid 6-digit verification code or token."""
     client_ip = get_client_ip(request)
-    limiter.check_rate_limit(f"verify_ip:{client_ip}", max_requests=10, window_seconds=300, action="verification attempt")
+    limiter.check_rate_limit(f"verify_ip:{client_ip}", max_requests=30, window_seconds=300, action="verification attempt")
 
     import urllib.parse
     raw_code = (payload.code or payload.token or "").strip()
@@ -198,7 +198,7 @@ def resend_verification(
 ):
     """Generates and resends a 6-digit email verification code to a registered user in background."""
     client_ip = get_client_ip(request)
-    limiter.check_rate_limit(f"resend_verify:{client_ip}", max_requests=5, window_seconds=300, action="verification resend")
+    limiter.check_rate_limit(f"resend_verify:{client_ip}", max_requests=15, window_seconds=300, action="verification resend")
 
     email_clean = payload.email.strip().lower()
     user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
@@ -241,7 +241,7 @@ def forgot_password(
 ):
     """Generates a secure password reset token and dispatches reset email in background."""
     client_ip = get_client_ip(request)
-    limiter.check_rate_limit(f"forgot_pwd:{client_ip}", max_requests=5, window_seconds=300, action="password reset request")
+    limiter.check_rate_limit(f"forgot_pwd:{client_ip}", max_requests=15, window_seconds=300, action="password reset request")
 
     email_clean = payload.email.strip().lower()
     user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
@@ -321,37 +321,45 @@ def login_for_access_token(
     client_ip = get_client_ip(request)
     email_clean = user_credentials.email.strip().lower()
 
-    # Rate limiting and brute force lockout protection
-    limiter.check_rate_limit(f"login_ip:{client_ip}", max_requests=15, window_seconds=60, action="login")
+    # Rate limiting (IP level: 60 requests/min) and brute force account lockout (per email)
+    limiter.check_rate_limit(f"login_ip:{client_ip}", max_requests=60, window_seconds=60, action="login")
     limiter.check_lockout(f"email:{email_clean}")
-    limiter.check_lockout(f"ip:{client_ip}")
 
-    user = db.query(User).filter(func.lower(User.email) == email_clean).first()
+    user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
     
-    if not user or not verify_password(user_credentials.password, user.hashed_password):
-        limiter.record_failure(f"email:{email_clean}")
-        limiter.record_failure(f"ip:{client_ip}")
+    # 1. Unrecognized User: entered email does not belong to any employee/admin account
+    if not user:
+        limiter.record_failure(f"email:{email_clean}", max_failures=8, lockout_seconds=300)
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password.",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Your account was not found. Please contact company administrator to receive the account setup email."
         )
-    
+
+    # 2. Deactivated / Inactive account check
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Inactive account. Please contact system administrator."
         )
 
+    # 3. Setup Pending User: employee account exists but setup is still pending
     if user.role == "employee" and not user.is_setup_complete:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your employee account setup is incomplete. Please use the setup link sent to your email to set your password before logging in."
+            detail="Please complete your account setup. Check your email for the account setup instructions."
+        )
+
+    # 4. Credential Verification for Setup Completed Employee & Admin
+    if not verify_password(user_credentials.password, user.hashed_password):
+        limiter.record_failure(f"email:{email_clean}", max_failures=8, lockout_seconds=300)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     # Authentication succeeded: reset failure trackers
     limiter.record_success(f"email:{email_clean}")
-    limiter.record_success(f"ip:{client_ip}")
 
     # Track login count and first_login status
     current_count = user.login_count if user.login_count is not None else 0
@@ -396,7 +404,7 @@ def google_auth(
     db: Session = Depends(get_db)
 ):
     client_ip = get_client_ip(request)
-    limiter.check_rate_limit(f"google_ip:{client_ip}", max_requests=20, window_seconds=60, action="Google authentication")
+    limiter.check_rate_limit(f"google_ip:{client_ip}", max_requests=60, window_seconds=60, action="Google authentication")
 
     if not payload.id_token:
         raise HTTPException(
@@ -414,7 +422,7 @@ def google_auth(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid or expired Google ID token: {str(e)}"
+            detail="Google sign-in could not be completed. Please try again."
         )
 
     google_user_id = id_info.get("sub")
@@ -444,28 +452,22 @@ def google_auth(
             db.commit()
             db.refresh(user)
         else:
-            # Step 3: Create new user
-            user = User(
-                email=email_clean,
-                full_name=name,
-                hashed_password=None,
-                google_id=google_user_id,
-                auth_provider="google",
-                role="admin",
-                is_active=True,
-                is_verified=True,
-                first_login=False,
-                login_count=1,
-                is_setup_complete=True
+            # Unrecognized user: do not create account automatically
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Your account was not found. Please contact company administrator to receive the account setup email."
             )
-            db.add(user)
-            db.commit()
-            db.refresh(user)
 
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Inactive account. Please contact system administrator."
+        )
+
+    if user.role == "employee" and not user.is_setup_complete:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Please complete your account setup. Check your email for the account setup instructions."
         )
 
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -537,7 +539,7 @@ def setup_employee_account(
     - Sets password, sets is_setup_complete=True, and invalidates the token.
     """
     client_ip = get_client_ip(request)
-    limiter.check_rate_limit(f"setup_ip:{client_ip}", max_requests=10, window_seconds=300, action="employee setup attempt")
+    limiter.check_rate_limit(f"setup_ip:{client_ip}", max_requests=30, window_seconds=300, action="employee setup attempt")
 
     token_raw = payload.token.strip()
     submitted_email = payload.email.strip().lower()

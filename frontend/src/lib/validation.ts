@@ -16,3 +16,12 @@ export const isPasswordValid = (password: string): boolean => {
 };
 
 export const PASSWORD_ERROR_MESSAGE = 'please provide a valid password';
+
+export {
+  validateEmail,
+  isValidEmail,
+  sanitizeEmail,
+  EMAIL_ERROR_MESSAGE,
+  emailZodSchema,
+} from './validators/emailValidator';
+export type { EmailValidationResult, EmailValidationReason } from './validators/emailValidator';

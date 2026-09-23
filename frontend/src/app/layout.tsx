@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: 'HR & Employee Management Portal',
-  description: 'Enterprise HR/Admin and Employee Management Portal with Python FastAPI REST API backend and PostgreSQL database.',
+  description: 'Enterprise HR and Employee Management Portal.',
 };
 
 export default function RootLayout({

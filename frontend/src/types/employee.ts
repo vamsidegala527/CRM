@@ -18,6 +18,13 @@ export interface User {
   company?: string | null;
   address?: string | null;
   notes?: string | null;
+  emergency_contact?: string | null;
+  experience_years?: string | null;
+  previous_companies?: string | null;
+  previous_roles?: string | null;
+  skills?: string | null;
+  education?: string | null;
+  certifications?: string | null;
   created_at: string;
   setup_url?: string | null;
   invitation_code?: string | null;
@@ -41,6 +48,13 @@ export interface EmployeeCreateInput {
   address?: string;
   notes?: string;
   phone?: string;
+  emergency_contact?: string;
+  experience_years?: string;
+  previous_companies?: string;
+  previous_roles?: string;
+  skills?: string;
+  education?: string;
+  certifications?: string;
 }
 
 export interface EmployeeUpdateInput {
@@ -52,6 +66,13 @@ export interface EmployeeUpdateInput {
   notes?: string;
   phone?: string;
   is_active?: boolean;
+  emergency_contact?: string;
+  experience_years?: string;
+  previous_companies?: string;
+  previous_roles?: string;
+  skills?: string;
+  education?: string;
+  certifications?: string;
 }
 
 export interface EmployeeSelfUpdateInput {
@@ -59,6 +80,13 @@ export interface EmployeeSelfUpdateInput {
   department?: string;
   phone?: string;
   address?: string;
+  emergency_contact?: string;
+  experience_years?: string;
+  previous_companies?: string;
+  previous_roles?: string;
+  skills?: string;
+  education?: string;
+  certifications?: string;
 }
 
 export interface ChangePasswordInput {

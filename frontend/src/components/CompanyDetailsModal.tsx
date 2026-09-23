@@ -2,6 +2,10 @@
 
 import React, { useState, useEffect } from 'react';
 import { api } from '../lib/api';
+import { formatUserFriendlyError } from '../lib/errorUtils';
+import PhoneInput from './PhoneInput';
+import { formatPhoneNumberDisplay } from '../lib/phoneUtils';
+import { validateEmail, EMAIL_ERROR_MESSAGE } from '../lib/validators/emailValidator';
 
 interface CompanyDetailsModalProps {
   isOpen: boolean;
@@ -11,7 +15,7 @@ interface CompanyDetailsModalProps {
 }
 
 const EMPTY_FORM = {
-  // Identity & Branding
+  // 1. Overview & Identity
   company_name: '',
   tagline: '',
   logo_url: '',
@@ -20,35 +24,31 @@ const EMPTY_FORM = {
   founded_year: '',
   company_size: '',
   registration_number: '',
-  // Location & Contact
-  headquarters_address: '',
   city: '',
-  state: '',
   country: '',
-  postal_code: '',
-  phone: '',
-  fax: '',
-  contact_email: '',
-  support_email: '',
-  // Online Presence
   website_url: '',
-  careers_url: '',
   linkedin_url: '',
-  twitter_url: '',
-  instagram_url: '',
-  facebook_url: '',
-  // About & Culture
-  about: '',
+
+  // 2. Mission, Vision & Culture
   mission: '',
   vision: '',
   core_values: '',
+  about: '',
   culture_description: '',
-  // Business Details
-  annual_revenue: '',
-  products_services: '',
-  key_clients: '',
-  certifications: '',
-  awards: '',
+
+  // 3. Workplace Policies & Benefits
+  work_model: '',
+  working_hours: '',
+  leave_policy_summary: '',
+  benefits_summary: '',
+  workplace_guidelines: '',
+
+  // 4. Leadership & Key Contacts
+  executive_leadership: '',
+  hr_contact_email: '',
+  it_support_email: '',
+  finance_email: '',
+  emergency_contact: '',
 };
 
 type FormState = typeof EMPTY_FORM;
@@ -65,8 +65,8 @@ function toFormState(data: any): FormState {
 
 const SECTIONS = [
   {
-    key: 'identity',
-    label: '🏢 Identity & Branding',
+    key: 'overview',
+    label: '🏢 Overview & Identity',
     fields: [
       { key: 'company_name', label: 'Company Name', type: 'text', placeholder: 'e.g. Acme Corporation', required: true },
       { key: 'tagline', label: 'Tagline', type: 'text', placeholder: 'e.g. Empowering people, together' },
@@ -74,57 +74,45 @@ const SECTIONS = [
       { key: 'company_type', label: 'Company Type', type: 'select', options: ['', 'Private', 'Public', 'Non-profit', 'Startup', 'Government', 'Partnership', 'Other'] },
       { key: 'founded_year', label: 'Founded Year', type: 'number', placeholder: 'e.g. 2015' },
       { key: 'company_size', label: 'Company Size', type: 'select', options: ['', '1–10', '11–50', '51–200', '201–500', '501–1000', '1001–5000', '5000+'] },
-      { key: 'registration_number', label: 'Registration Number', type: 'text', placeholder: 'Official business registration ID' },
+      { key: 'city', label: 'Headquarters City', type: 'text', placeholder: 'e.g. San Francisco' },
+      { key: 'country', label: 'Headquarters Country', type: 'text', placeholder: 'e.g. United States' },
+      { key: 'website_url', label: 'Official Website', type: 'url', placeholder: 'https://www.company.com' },
+      { key: 'linkedin_url', label: 'LinkedIn Page', type: 'url', placeholder: 'https://linkedin.com/company/...' },
+      { key: 'registration_number', label: 'Registration Number / Tax ID', type: 'text', placeholder: 'Official business registration ID' },
       { key: 'logo_url', label: 'Logo URL', type: 'url', placeholder: 'https://example.com/logo.png' },
     ],
   },
   {
-    key: 'location',
-    label: '📍 Location & Contact',
+    key: 'culture',
+    label: '🎯 Mission, Vision & Culture',
     fields: [
-      { key: 'headquarters_address', label: 'Headquarters Address', type: 'textarea', placeholder: '123 Innovation Way, Suite 400' },
-      { key: 'city', label: 'City', type: 'text', placeholder: 'e.g. San Francisco' },
-      { key: 'state', label: 'State / Province', type: 'text', placeholder: 'e.g. California' },
-      { key: 'country', label: 'Country', type: 'text', placeholder: 'e.g. United States' },
-      { key: 'postal_code', label: 'Postal / ZIP Code', type: 'text', placeholder: 'e.g. 94105' },
-      { key: 'phone', label: 'Main Phone', type: 'tel', placeholder: '+1 (555) 000-0000' },
-      { key: 'fax', label: 'Fax', type: 'tel', placeholder: '+1 (555) 000-0001' },
-      { key: 'contact_email', label: 'Contact Email', type: 'email', placeholder: 'contact@company.com' },
-      { key: 'support_email', label: 'Support / HR Email', type: 'email', placeholder: 'hr@company.com' },
-    ],
-  },
-  {
-    key: 'online',
-    label: '🌐 Online Presence',
-    fields: [
-      { key: 'website_url', label: 'Website', type: 'url', placeholder: 'https://www.company.com' },
-      { key: 'careers_url', label: 'Careers Page', type: 'url', placeholder: 'https://www.company.com/careers' },
-      { key: 'linkedin_url', label: 'LinkedIn', type: 'url', placeholder: 'https://linkedin.com/company/...' },
-      { key: 'twitter_url', label: 'Twitter / X', type: 'url', placeholder: 'https://twitter.com/...' },
-      { key: 'instagram_url', label: 'Instagram', type: 'url', placeholder: 'https://instagram.com/...' },
-      { key: 'facebook_url', label: 'Facebook', type: 'url', placeholder: 'https://facebook.com/...' },
-    ],
-  },
-  {
-    key: 'about',
-    label: '📝 About & Culture',
-    fields: [
-      { key: 'about', label: 'About the Company', type: 'textarea', placeholder: 'Company overview, history, and general description...' },
       { key: 'mission', label: 'Mission Statement', type: 'textarea', placeholder: 'Our mission is to...' },
       { key: 'vision', label: 'Vision Statement', type: 'textarea', placeholder: 'We envision a world where...' },
       { key: 'core_values', label: 'Core Values', type: 'textarea', placeholder: 'e.g. Integrity, Innovation, Collaboration, Excellence' },
-      { key: 'culture_description', label: 'Culture & Work Environment', type: 'textarea', placeholder: 'Describe the work culture, perks, and team environment...' },
+      { key: 'about', label: 'About the Company', type: 'textarea', placeholder: 'Company overview, history, and general description...' },
+      { key: 'culture_description', label: 'Culture & Work Environment', type: 'textarea', placeholder: 'Describe the work culture, team environment, and shared values...' },
     ],
   },
   {
-    key: 'business',
-    label: '📊 Business Details',
+    key: 'policies',
+    label: '📋 Policies & Benefits',
     fields: [
-      { key: 'annual_revenue', label: 'Annual Revenue (Approx.)', type: 'text', placeholder: 'e.g. $5M – $10M' },
-      { key: 'products_services', label: 'Products & Services', type: 'textarea', placeholder: 'Brief description of what the company offers...' },
-      { key: 'key_clients', label: 'Key Clients / Partners', type: 'textarea', placeholder: 'Notable clients or strategic partners...' },
-      { key: 'certifications', label: 'Certifications', type: 'textarea', placeholder: 'e.g. ISO 9001, SOC2 Type II, GDPR Compliant' },
-      { key: 'awards', label: 'Awards & Recognition', type: 'textarea', placeholder: 'Notable awards, accolades, or recognitions received...' },
+      { key: 'work_model', label: 'Workplace Model', type: 'select', options: ['', 'Remote', 'Hybrid', 'On-site', 'Flexible'] },
+      { key: 'working_hours', label: 'Working Hours & Timezone', type: 'text', placeholder: 'e.g. 09:00 - 18:00 (EST / UTC-5)' },
+      { key: 'leave_policy_summary', label: 'Leave & Holidays Policy Summary', type: 'textarea', placeholder: 'Overview of annual leave, sick days, and observed company holidays...' },
+      { key: 'benefits_summary', label: 'Employee Benefits & Perks', type: 'textarea', placeholder: 'Health coverage, 401(k), wellness stipends, learning allowances...' },
+      { key: 'workplace_guidelines', label: 'Workplace Guidelines & Code of Conduct', type: 'textarea', placeholder: 'Communication norms, attendance, and professional standards...' },
+    ],
+  },
+  {
+    key: 'leadership',
+    label: '👥 Leadership & Key Contacts',
+    fields: [
+      { key: 'executive_leadership', label: 'Executive Leadership & Founders', type: 'textarea', placeholder: 'e.g. Jane Doe (CEO & Founder), John Smith (CTO), Sarah Connor (Head of People)' },
+      { key: 'hr_contact_email', label: 'People & HR Escalation Email', type: 'email', placeholder: 'hr@company.com' },
+      { key: 'it_support_email', label: 'IT Support & Helpdesk Email', type: 'email', placeholder: 'it-support@company.com' },
+      { key: 'finance_email', label: 'Payroll & Finance Inquiries Email', type: 'email', placeholder: 'finance@company.com' },
+      { key: 'emergency_contact', label: 'Emergency Support Helpline', type: 'text', placeholder: '+1 (555) 911-0000 or emergency escalation channel' },
     ],
   },
 ];
@@ -135,9 +123,9 @@ function SectionDivider({ label }: { label: string }) {
       display: 'flex',
       alignItems: 'center',
       gap: '0.75rem',
-      margin: '0.25rem 0 1rem',
+      margin: '0.5rem 0 1rem',
     }}>
-      <span style={{ fontSize: '1rem', fontWeight: 700, color: '#A5B4FC', whiteSpace: 'nowrap' }}>{label}</span>
+      <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#A5B4FC', whiteSpace: 'nowrap' }}>{label}</span>
       <div style={{ flex: 1, height: '1px', background: 'rgba(165,180,252,0.18)' }} />
     </div>
   );
@@ -172,25 +160,6 @@ function InfoRow({ icon, label, value, isLink = false }: { icon: string; label: 
   );
 }
 
-function SocialLink({ href, label, icon }: { href: string; label: string; icon: string }) {
-  if (!href) return null;
-  const url = href.startsWith('http') ? href : `https://${href}`;
-  return (
-    <a href={url} target="_blank" rel="noopener noreferrer" title={label} style={{
-      display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
-      padding: '0.4rem 0.9rem', borderRadius: '20px',
-      background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.25)',
-      color: '#A5B4FC', fontSize: '0.8rem', fontWeight: 600, textDecoration: 'none',
-      transition: 'all 0.2s',
-    }}
-      onMouseEnter={e => { e.currentTarget.style.background = 'rgba(99,102,241,0.25)'; e.currentTarget.style.borderColor = 'rgba(99,102,241,0.5)'; }}
-      onMouseLeave={e => { e.currentTarget.style.background = 'rgba(99,102,241,0.12)'; e.currentTarget.style.borderColor = 'rgba(99,102,241,0.25)'; }}
-    >
-      <span>{icon}</span> {label}
-    </a>
-  );
-}
-
 export default function CompanyDetailsModal({
   isOpen,
   onClose,
@@ -202,13 +171,14 @@ export default function CompanyDetailsModal({
   const [isEditMode, setIsEditMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
-  const [activeSection, setActiveSection] = useState('identity');
+  const [activeSection, setActiveSection] = useState('overview');
+  const [emailErrors, setEmailErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (isOpen) {
       fetchCompanyDetails();
       setIsEditMode(false);
-      setActiveSection('identity');
+      setActiveSection('overview');
     }
   }, [isOpen]);
 
@@ -219,7 +189,7 @@ export default function CompanyDetailsModal({
       setCompanyData(data);
       setForm(toFormState(data));
     } catch (err: any) {
-      showNotification(err.message || 'Failed to load company details.', 'error');
+      showNotification(formatUserFriendlyError(err, 'Unable to load company details.'), 'error');
     } finally {
       setIsLoading(false);
     }
@@ -227,6 +197,32 @@ export default function CompanyDetailsModal({
 
   function handleFieldChange(key: string, value: string) {
     setForm(prev => ({ ...prev, [key]: value }));
+    if (emailErrors[key]) {
+      const res = validateEmail(value.trim());
+      if (res.isValid || !value.trim()) {
+        setEmailErrors(prev => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+      }
+    }
+  }
+
+  function handleEmailBlur(key: string, value: string) {
+    const trimmed = value.trim();
+    if (trimmed) {
+      const res = validateEmail(trimmed);
+      if (!res.isValid) {
+        setEmailErrors(prev => ({ ...prev, [key]: EMAIL_ERROR_MESSAGE }));
+        return;
+      }
+    }
+    setEmailErrors(prev => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
   }
 
   async function handleSave() {
@@ -239,6 +235,29 @@ export default function CompanyDetailsModal({
       const payload: Record<string, any> = { ...form };
       if (payload.founded_year === '') payload.founded_year = null;
       else if (payload.founded_year) payload.founded_year = parseInt(payload.founded_year, 10);
+
+      // Validate email fields
+      const newEmailErrors: Record<string, string> = {};
+      const emailFields = ['hr_contact_email', 'it_support_email', 'finance_email'];
+      for (const field of emailFields) {
+        const val = form[field as keyof FormState];
+        if (val && val.trim()) {
+          const res = validateEmail(val.trim());
+          if (!res.isValid) {
+            newEmailErrors[field] = EMAIL_ERROR_MESSAGE;
+          } else {
+            payload[field] = res.sanitizedEmail;
+          }
+        }
+      }
+
+      if (Object.keys(newEmailErrors).length > 0) {
+        setEmailErrors(newEmailErrors);
+        showNotification('Please fix the email errors before saving.', 'error');
+        setIsSaving(false);
+        return;
+      }
+
       // Convert empty strings to null
       for (const key of Object.keys(payload)) {
         if (payload[key] === '') payload[key] = null;
@@ -249,7 +268,7 @@ export default function CompanyDetailsModal({
       setIsEditMode(false);
       showNotification('Company details saved successfully!', 'success');
     } catch (err: any) {
-      showNotification(err.message || 'Failed to save company details.', 'error');
+      showNotification(formatUserFriendlyError(err, 'Unable to save company details.'), 'error');
     } finally {
       setIsSaving(false);
     }
@@ -257,6 +276,7 @@ export default function CompanyDetailsModal({
 
   function handleCancel() {
     setForm(toFormState(companyData));
+    setEmailErrors({});
     setIsEditMode(false);
   }
 
@@ -323,7 +343,7 @@ export default function CompanyDetailsModal({
                 {isEditMode ? 'Edit Company Details' : (companyData?.company_name || 'Company Profile')}
               </h2>
               <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-subtle)' }}>
-                {isEditMode ? 'Update your organization\'s public profile' : (companyData?.tagline || 'View organization information')}
+                {isEditMode ? 'Update organization information and guidelines' : (companyData?.tagline || 'View organization profile & workplace guidelines')}
               </p>
             </div>
           </div>
@@ -387,9 +407,9 @@ export default function CompanyDetailsModal({
                 border: activeSection === sec.key ? '1px solid rgba(99,102,241,0.4)' : '1px solid transparent',
                 borderBottom: 'none',
                 borderRadius: '8px 8px 0 0',
-                padding: '0.5rem 1rem',
+                padding: '0.55rem 1rem',
                 color: activeSection === sec.key ? '#A5B4FC' : 'var(--text-subtle)',
-                fontSize: '0.78rem',
+                fontSize: '0.8rem',
                 fontWeight: 600,
                 cursor: 'pointer',
                 whiteSpace: 'nowrap',
@@ -430,8 +450,8 @@ export default function CompanyDetailsModal({
                             value={form[field.key as keyof FormState]}
                             onChange={e => handleFieldChange(field.key, e.target.value)}
                             placeholder={(field as any).placeholder || ''}
-                            rows={4}
-                            style={{ resize: 'vertical', minHeight: '90px' }}
+                            rows={field.key === 'leave_policy_summary' || field.key === 'benefits_summary' ? 4 : 3}
+                            style={{ resize: 'vertical', minHeight: '85px' }}
                           />
                         ) : field.type === 'select' ? (
                           <select
@@ -443,6 +463,23 @@ export default function CompanyDetailsModal({
                               <option key={opt} value={opt}>{opt || '— Select —'}</option>
                             ))}
                           </select>
+                        ) : field.type === 'email' ? (
+                          <div>
+                            <input
+                              type="email"
+                              className="form-control"
+                              value={form[field.key as keyof FormState]}
+                              onChange={e => handleFieldChange(field.key, e.target.value)}
+                              onBlur={e => handleEmailBlur(field.key, e.target.value)}
+                              placeholder={(field as any).placeholder || ''}
+                              style={emailErrors[field.key] ? { borderColor: 'var(--accent-rose, #F43F5E)' } : undefined}
+                            />
+                            {emailErrors[field.key] && (
+                              <span style={{ display: 'block', fontSize: '0.78rem', color: '#F43F5E', marginTop: '0.35rem' }}>
+                                {emailErrors[field.key]}
+                              </span>
+                            )}
+                          </div>
                         ) : (
                           <input
                             type={field.type}
@@ -521,68 +558,71 @@ export default function CompanyDetailsModal({
                 </div>
               ) : (
                 <>
-                  {activeSection === 'identity' && (
+                  {/* TAB 1: OVERVIEW & IDENTITY */}
+                  {activeSection === 'overview' && (
                     <div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '0' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.25rem' }}>
                         <InfoRow icon="🏭" label="Industry" value={companyData?.industry} />
                         <InfoRow icon="🏷️" label="Company Type" value={companyData?.company_type} />
                         <InfoRow icon="📅" label="Founded Year" value={companyData?.founded_year ? String(companyData.founded_year) : null} />
                         <InfoRow icon="👥" label="Company Size" value={companyData?.company_size} />
-                        <InfoRow icon="🔖" label="Registration No." value={companyData?.registration_number} />
+                        <InfoRow icon="🏙️" label="Headquarters City" value={companyData?.city} />
+                        <InfoRow icon="🌍" label="Headquarters Country" value={companyData?.country} />
+                        <InfoRow icon="🔖" label="Registration / Tax ID" value={companyData?.registration_number} />
                       </div>
-                    </div>
-                  )}
 
-                  {activeSection === 'location' && (
-                    <div>
-                      <InfoRow icon="📍" label="Headquarters Address" value={companyData?.headquarters_address} />
-                      <InfoRow icon="🏙️" label="City" value={companyData?.city} />
-                      <InfoRow icon="🗺️" label="State / Province" value={companyData?.state} />
-                      <InfoRow icon="🌍" label="Country" value={companyData?.country} />
-                      <InfoRow icon="📮" label="Postal / ZIP Code" value={companyData?.postal_code} />
-                      <InfoRow icon="📞" label="Main Phone" value={companyData?.phone} />
-                      <InfoRow icon="📠" label="Fax" value={companyData?.fax} />
-                      <InfoRow icon="📧" label="Contact Email" value={companyData?.contact_email} />
-                      <InfoRow icon="🆘" label="Support / HR Email" value={companyData?.support_email} />
-                    </div>
-                  )}
-
-                  {activeSection === 'online' && (
-                    <div>
-                      <InfoRow icon="🌐" label="Website" value={companyData?.website_url} isLink />
-                      <InfoRow icon="💼" label="Careers Page" value={companyData?.careers_url} isLink />
-                      <div style={{ marginTop: '1.25rem' }}>
-                        <SectionDivider label="Social Media" />
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem' }}>
-                          <SocialLink href={companyData?.linkedin_url} label="LinkedIn" icon="💼" />
-                          <SocialLink href={companyData?.twitter_url} label="Twitter / X" icon="🐦" />
-                          <SocialLink href={companyData?.instagram_url} label="Instagram" icon="📸" />
-                          <SocialLink href={companyData?.facebook_url} label="Facebook" icon="👍" />
+                      {(companyData?.website_url || companyData?.linkedin_url) && (
+                        <div style={{ marginTop: '1.25rem' }}>
+                          <SectionDivider label="Quick Links" />
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}>
+                            {companyData?.website_url && (
+                              <a
+                                href={companyData.website_url.startsWith('http') ? companyData.website_url : `https://${companyData.website_url}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: '0.45rem',
+                                  padding: '0.45rem 1rem', borderRadius: '12px',
+                                  background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)',
+                                  color: '#A5B4FC', fontSize: '0.85rem', fontWeight: 600, textDecoration: 'none',
+                                }}
+                              >
+                                <span>🌐</span> Official Website ↗
+                              </a>
+                            )}
+                            {companyData?.linkedin_url && (
+                              <a
+                                href={companyData.linkedin_url.startsWith('http') ? companyData.linkedin_url : `https://${companyData.linkedin_url}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: '0.45rem',
+                                  padding: '0.45rem 1rem', borderRadius: '12px',
+                                  background: 'rgba(6,182,212,0.12)', border: '1px solid rgba(6,182,212,0.3)',
+                                  color: '#22D3EE', fontSize: '0.85rem', fontWeight: 600, textDecoration: 'none',
+                                }}
+                              >
+                                <span>💼</span> LinkedIn Profile ↗
+                              </a>
+                            )}
+                          </div>
                         </div>
-                        {!companyData?.linkedin_url && !companyData?.twitter_url && !companyData?.instagram_url && !companyData?.facebook_url && (
-                          <p style={{ color: 'var(--text-subtle)', fontSize: '0.85rem', fontStyle: 'italic' }}>No social media links added.</p>
-                        )}
-                      </div>
+                      )}
                     </div>
                   )}
 
-                  {activeSection === 'about' && (
+                  {/* TAB 2: MISSION, VISION & CULTURE */}
+                  {activeSection === 'culture' && (
                     <div>
-                      {companyData?.about && (
-                        <>
-                          <SectionDivider label="About the Company" />
-                          <p style={{ color: 'var(--text-main)', fontSize: '0.92rem', lineHeight: 1.7, whiteSpace: 'pre-wrap', marginTop: 0 }}>{companyData.about}</p>
-                        </>
-                      )}
                       {companyData?.mission && (
                         <>
-                          <SectionDivider label="Mission" />
+                          <SectionDivider label="Mission Statement" />
                           <p style={{ color: 'var(--text-main)', fontSize: '0.92rem', lineHeight: 1.7, whiteSpace: 'pre-wrap', marginTop: 0 }}>{companyData.mission}</p>
                         </>
                       )}
                       {companyData?.vision && (
                         <>
-                          <SectionDivider label="Vision" />
+                          <SectionDivider label="Vision Statement" />
                           <p style={{ color: 'var(--text-main)', fontSize: '0.92rem', lineHeight: 1.7, whiteSpace: 'pre-wrap', marginTop: 0 }}>{companyData.vision}</p>
                         </>
                       )}
@@ -592,6 +632,12 @@ export default function CompanyDetailsModal({
                           <p style={{ color: 'var(--text-main)', fontSize: '0.92rem', lineHeight: 1.7, whiteSpace: 'pre-wrap', marginTop: 0 }}>{companyData.core_values}</p>
                         </>
                       )}
+                      {companyData?.about && (
+                        <>
+                          <SectionDivider label="About the Company" />
+                          <p style={{ color: 'var(--text-main)', fontSize: '0.92rem', lineHeight: 1.7, whiteSpace: 'pre-wrap', marginTop: 0 }}>{companyData.about}</p>
+                        </>
+                      )}
                       {companyData?.culture_description && (
                         <>
                           <SectionDivider label="Culture & Work Environment" />
@@ -599,40 +645,82 @@ export default function CompanyDetailsModal({
                         </>
                       )}
                       {!companyData?.about && !companyData?.mission && !companyData?.vision && !companyData?.core_values && !companyData?.culture_description && (
-                        <p style={{ color: 'var(--text-subtle)', fontSize: '0.88rem', fontStyle: 'italic' }}>No about/culture information added yet.</p>
+                        <p style={{ color: 'var(--text-subtle)', fontSize: '0.88rem', fontStyle: 'italic' }}>No mission, vision, or culture details added yet.</p>
                       )}
                     </div>
                   )}
 
-                  {activeSection === 'business' && (
+                  {/* TAB 3: WORKPLACE POLICIES & BENEFITS */}
+                  {activeSection === 'policies' && (
                     <div>
-                      <InfoRow icon="💰" label="Annual Revenue (Approx.)" value={companyData?.annual_revenue} />
-                      {companyData?.products_services && (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.5rem', marginBottom: '1.25rem' }}>
+                        {companyData?.work_model && (
+                          <div style={{
+                            padding: '0.85rem 1rem', borderRadius: '12px',
+                            background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.25)',
+                          }}>
+                            <div style={{ fontSize: '0.72rem', color: '#34D399', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Work Model</div>
+                            <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-main)', marginTop: '0.2rem' }}>{companyData.work_model}</div>
+                          </div>
+                        )}
+                        {companyData?.working_hours && (
+                          <div style={{
+                            padding: '0.85rem 1rem', borderRadius: '12px',
+                            background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.25)',
+                          }}>
+                            <div style={{ fontSize: '0.72rem', color: '#A5B4FC', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Working Hours</div>
+                            <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-main)', marginTop: '0.2rem' }}>{companyData.working_hours}</div>
+                          </div>
+                        )}
+                      </div>
+
+                      {companyData?.leave_policy_summary && (
                         <>
-                          <SectionDivider label="Products & Services" />
-                          <p style={{ color: 'var(--text-main)', fontSize: '0.92rem', lineHeight: 1.7, whiteSpace: 'pre-wrap', marginTop: 0 }}>{companyData.products_services}</p>
+                          <SectionDivider label="Leave & Holiday Policy Summary" />
+                          <p style={{ color: 'var(--text-main)', fontSize: '0.92rem', lineHeight: 1.7, whiteSpace: 'pre-wrap', marginTop: 0 }}>{companyData.leave_policy_summary}</p>
                         </>
                       )}
-                      {companyData?.key_clients && (
+                      {companyData?.benefits_summary && (
                         <>
-                          <SectionDivider label="Key Clients & Partners" />
-                          <p style={{ color: 'var(--text-main)', fontSize: '0.92rem', lineHeight: 1.7, whiteSpace: 'pre-wrap', marginTop: 0 }}>{companyData.key_clients}</p>
+                          <SectionDivider label="Employee Benefits & Perks" />
+                          <p style={{ color: 'var(--text-main)', fontSize: '0.92rem', lineHeight: 1.7, whiteSpace: 'pre-wrap', marginTop: 0 }}>{companyData.benefits_summary}</p>
                         </>
                       )}
-                      {companyData?.certifications && (
+                      {companyData?.workplace_guidelines && (
                         <>
-                          <SectionDivider label="Certifications" />
-                          <p style={{ color: 'var(--text-main)', fontSize: '0.92rem', lineHeight: 1.7, whiteSpace: 'pre-wrap', marginTop: 0 }}>{companyData.certifications}</p>
+                          <SectionDivider label="Workplace Guidelines & Code of Conduct" />
+                          <p style={{ color: 'var(--text-main)', fontSize: '0.92rem', lineHeight: 1.7, whiteSpace: 'pre-wrap', marginTop: 0 }}>{companyData.workplace_guidelines}</p>
                         </>
                       )}
-                      {companyData?.awards && (
+
+                      {!companyData?.work_model && !companyData?.working_hours && !companyData?.leave_policy_summary && !companyData?.benefits_summary && !companyData?.workplace_guidelines && (
+                        <p style={{ color: 'var(--text-subtle)', fontSize: '0.88rem', fontStyle: 'italic' }}>No workplace policies or benefits information added yet.</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* TAB 4: LEADERSHIP & KEY CONTACTS */}
+                  {activeSection === 'leadership' && (
+                    <div>
+                      {companyData?.executive_leadership && (
                         <>
-                          <SectionDivider label="Awards & Recognition" />
-                          <p style={{ color: 'var(--text-main)', fontSize: '0.92rem', lineHeight: 1.7, whiteSpace: 'pre-wrap', marginTop: 0 }}>{companyData.awards}</p>
+                          <SectionDivider label="Executive Leadership & Founders" />
+                          <p style={{ color: 'var(--text-main)', fontSize: '0.92rem', lineHeight: 1.7, whiteSpace: 'pre-wrap', marginTop: 0 }}>{companyData.executive_leadership}</p>
                         </>
                       )}
-                      {!companyData?.annual_revenue && !companyData?.products_services && !companyData?.key_clients && !companyData?.certifications && !companyData?.awards && (
-                        <p style={{ color: 'var(--text-subtle)', fontSize: '0.88rem', fontStyle: 'italic' }}>No business details added yet.</p>
+
+                      <div style={{ marginTop: '1rem' }}>
+                        <SectionDivider label="Internal Department Contacts" />
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '0' }}>
+                          <InfoRow icon="👥" label="People & HR Escalations" value={companyData?.hr_contact_email} />
+                          <InfoRow icon="💻" label="IT & Technical Support" value={companyData?.it_support_email} />
+                          <InfoRow icon="💵" label="Payroll & Finance" value={companyData?.finance_email} />
+                          <InfoRow icon="🚨" label="Emergency Support Helpline" value={companyData?.emergency_contact} />
+                        </div>
+                      </div>
+
+                      {!companyData?.executive_leadership && !companyData?.hr_contact_email && !companyData?.it_support_email && !companyData?.finance_email && !companyData?.emergency_contact && (
+                        <p style={{ color: 'var(--text-subtle)', fontSize: '0.88rem', fontStyle: 'italic' }}>No leadership or key contacts information added yet.</p>
                       )}
                     </div>
                   )}

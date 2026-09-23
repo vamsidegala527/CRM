@@ -23,7 +23,7 @@ let adminToken = null;
 describe('Frontend Security & RBAC Boundary Tests', () => {
   before(async () => {
     // 1. Authenticate as Admin to set up an Employee
-    const adminEmail = `admin_sec_${Date.now()}@example.com`;
+    const adminEmail = `admin_sec_${Date.now()}@company.com`;
     const adminPassword = 'AdminPassword123!';
 
     const regAdminRes = await fetch(`${BACKEND_URL}/api/auth/register`, {
@@ -50,7 +50,7 @@ describe('Frontend Security & RBAC Boundary Tests', () => {
     adminToken = adminData.access_token;
 
     // 2. Admin creates an Employee
-    const empEmail = `emp_sec_${Date.now()}@example.com`;
+    const empEmail = `emp_sec_${Date.now()}@company.com`;
     const empPassword = 'EmployeePassword123!';
 
     const createEmpRes = await fetch(`${BACKEND_URL}/api/employees`, {
@@ -73,7 +73,7 @@ describe('Frontend Security & RBAC Boundary Tests', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: `emp_alt_${Date.now()}@example.com`,
+        email: `emp_alt_${Date.now()}@company.com`,
         full_name: 'Alt Employee',
         password: empPassword,
       }),
@@ -84,7 +84,7 @@ describe('Frontend Security & RBAC Boundary Tests', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: 'emp@example.com',
+        email: 'emp@company.com',
         password: 'Password123!',
       }),
     });
@@ -115,7 +115,7 @@ describe('Frontend Security & RBAC Boundary Tests', () => {
   it('Scenario 1: Employee cannot access Admin URLs/routes (Employee Management)', async () => {
     const adminRoutes = [
       { method: 'GET', url: '/api/employees' },
-      { method: 'POST', url: '/api/employees', body: { name: 'Rogue Employee', email: 'rogue_emp@example.com' } },
+      { method: 'POST', url: '/api/employees', body: { name: 'Rogue Employee', email: 'rogue_emp@company.com' } },
       { method: 'DELETE', url: '/api/employees/1' },
       { method: 'POST', url: '/api/employees/1/send-login-email' },
       { method: 'GET', url: '/api/employees/metrics' },

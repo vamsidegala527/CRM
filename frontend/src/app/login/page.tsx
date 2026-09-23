@@ -4,8 +4,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Script from 'next/script';
 import { api } from '../../lib/api';
-import { isPasswordValid, PASSWORD_ERROR_MESSAGE } from '../../lib/validation';
+import { formatUserFriendlyError } from '../../lib/errorUtils';
 import PasswordInput from '../../components/PasswordInput';
+import { validateEmail, EMAIL_ERROR_MESSAGE } from '../../lib/validators/emailValidator';
 
 declare global {
   interface Window {
@@ -45,31 +46,40 @@ export default function LoginPage() {
     }
   }, [router]);
 
-  const [authMode, setAuthMode] = useState<'signin' | 'register' | 'forgot'>('signin');
+  const [authMode, setAuthMode] = useState<'signin' | 'forgot'>('signin');
 
   const [email, setEmail] = useState('');
+  const [emailTouched, setEmailTouched] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [password, setPassword] = useState('');
-  const [fullName, setFullName] = useState('');
-
-  // Registration password validation & interaction tracking
-  const [passwordTouched, setPasswordTouched] = useState(false);
-  const [formSubmitted, setFormSubmitted] = useState(false);
 
   // Password reset step (request link or link sent confirmation)
   const [resetStep, setResetStep] = useState<'request' | 'sent'>('request');
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const handleEmailBlur = () => {
+    setEmailTouched(true);
+    if (!email.trim()) {
+      setEmailError(EMAIL_ERROR_MESSAGE);
+    } else {
+      const res = validateEmail(email);
+      setEmailError(res.isValid ? null : EMAIL_ERROR_MESSAGE);
+    }
+  };
+
+  const handleEmailChange = (val: string) => {
+    setEmail(val);
+    if (emailTouched) {
+      const res = validateEmail(val);
+      setEmailError(res.isValid ? null : EMAIL_ERROR_MESSAGE);
+    }
+  };
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const [gisLoaded, setGisLoaded] = useState(false);
   const [mounted, setMounted] = useState(false);
-
-  const isPasswordCriteriaMet = isPasswordValid(password);
-  const showPasswordError = authMode === 'register' && (
-    (formSubmitted && !isPasswordCriteriaMet) ||
-    (passwordTouched && password.length > 0 && !isPasswordCriteriaMet)
-  );
 
   useEffect(() => {
     setMounted(true);
@@ -83,11 +93,11 @@ export default function LoginPage() {
         await api.googleAuth(response.credential);
         router.push('/');
       } else {
-        setError('Google authentication did not return a valid credential.');
+        setError('Google sign-in was canceled. Please try again.');
       }
     } catch (err: any) {
       console.error('[Google GIS] Auth error:', err);
-      setError(err.message || 'An error occurred during Google authentication.');
+      setError(formatUserFriendlyError(err, 'Google sign-in failed. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -114,7 +124,7 @@ export default function LoginPage() {
           size: 'large',
           width: 376,
           shape: 'rectangular',
-          text: authMode === 'register' ? 'signup_with' : 'signin_with',
+          text: 'signin_with',
         });
       }
     }
@@ -136,46 +146,27 @@ export default function LoginPage() {
     e.preventDefault();
     setError(null);
     setSuccessMsg(null);
+
+    const emailRes = validateEmail(email);
+    if (!emailRes.isValid) {
+      setEmailTouched(true);
+      setEmailError(EMAIL_ERROR_MESSAGE);
+      return;
+    }
+
     setLoading(true);
 
     try {
-      if (authMode === 'register') {
-        setFormSubmitted(true);
-        if (!fullName.trim()) {
-          setError('Full Name is required for registration.');
-          setLoading(false);
-          return;
-        }
-        if (!isPasswordValid(password)) {
-          setLoading(false);
-          return;
-        }
-
-        const res = await api.register({
-          email: email.trim().toLowerCase(),
-          password,
-          full_name: fullName.trim(),
-        });
-        setSuccessMsg(res.message || 'Registration successful! Verification token generated. Please log in.');
-        setAuthMode('signin');
-        setPassword('');
-        setPasswordTouched(false);
-        setFormSubmitted(false);
-      } else if (authMode === 'signin') {
-        await api.login({ email: email.trim().toLowerCase(), password });
+      if (authMode === 'signin') {
+        await api.login({ email: emailRes.sanitizedEmail, password });
         router.push('/');
       } else if (authMode === 'forgot') {
-        if (!email.trim()) {
-          setError('Please enter your registered account email.');
-          setLoading(false);
-          return;
-        }
-        const res = await api.forgotPassword(email.trim());
+        const res = await api.forgotPassword(emailRes.sanitizedEmail);
         setSuccessMsg(res.message || 'Password reset link sent! Please check your email.');
         setResetStep('sent');
       }
     } catch (err: any) {
-      setError(err.message || 'Authentication request failed.');
+      setError(formatUserFriendlyError(err, 'Incorrect email or password.'));
     } finally {
       setLoading(false);
     }
@@ -248,16 +239,14 @@ export default function LoginPage() {
             HR
           </div>
           <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--text-main)', margin: '0 0 0.5rem' }}>
-            {authMode === 'register' ? 'Create HR/Admin Account' : authMode === 'forgot' ? 'Reset Password' : 'Sign In'}
+            {authMode === 'forgot' ? 'Reset Password' : 'Sign In'}
           </h2>
           <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-            {authMode === 'register'
-              ? 'Register your organization HR/Admin account to manage employees'
-              : authMode === 'forgot'
-                ? (resetStep === 'request'
-                    ? 'Enter your registered email to receive a password-reset link'
-                    : 'Check your inbox for the reset link')
-                : 'Sign in to access your HR & Employee Management Portal'}
+            {authMode === 'forgot'
+              ? (resetStep === 'request'
+                  ? 'Enter your registered email to receive a password-reset link'
+                  : 'Check your inbox for the reset link')
+              : 'Sign in to your organization account'}
           </p>
         </div>
 
@@ -325,8 +314,6 @@ export default function LoginPage() {
                 setResetStep('request');
                 setError(null);
                 setSuccessMsg(null);
-                setPasswordTouched(false);
-                setFormSubmitted(false);
               }}
             >
               Back to Sign In
@@ -353,31 +340,24 @@ export default function LoginPage() {
         ) : (
         /* Form */
         <form onSubmit={handleSubmit}>
-          {authMode === 'register' && (
-            <div className="form-group">
-              <label className="form-label">Full Name</label>
-              <input
-                type="text"
-                className="form-control"
-                placeholder="e.g. Alex Morgan"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                required
-              />
-            </div>
-          )}
-
-          {authMode !== 'forgot' && (
+          {authMode === 'signin' && (
             <div className="form-group">
               <label className="form-label">Email Address</label>
               <input
                 type="email"
                 className="form-control"
-                placeholder="e.g. user@example.com"
+                placeholder="name@company.com"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => handleEmailChange(e.target.value)}
+                onBlur={handleEmailBlur}
+                style={emailError ? { borderColor: 'var(--accent-rose, #F43F5E)' } : undefined}
                 required
               />
+              {emailError && (
+                <span style={{ display: 'block', fontSize: '0.78rem', color: '#F43F5E', marginTop: '0.35rem' }}>
+                  {emailError}
+                </span>
+              )}
             </div>
           )}
 
@@ -389,65 +369,49 @@ export default function LoginPage() {
                 className="form-control"
                 placeholder="Enter your account email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => handleEmailChange(e.target.value)}
+                onBlur={handleEmailBlur}
+                style={emailError ? { borderColor: 'var(--accent-rose, #F43F5E)' } : undefined}
                 required
               />
+              {emailError && (
+                <span style={{ display: 'block', fontSize: '0.78rem', color: '#F43F5E', marginTop: '0.35rem' }}>
+                  {emailError}
+                </span>
+              )}
             </div>
           )}
 
-
-          {authMode !== 'forgot' && (
+          {authMode === 'signin' && (
             <div className="form-group">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <label className="form-label">Password</label>
-                {authMode === 'signin' && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAuthMode('forgot');
-                      setResetStep('request');
-                      setError(null);
-                      setSuccessMsg(null);
-                      setPasswordTouched(false);
-                      setFormSubmitted(false);
-                    }}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: 'var(--primary)',
-                      fontSize: '0.78rem',
-                      cursor: 'pointer',
-                      padding: 0,
-                    }}
-                  >
-                    Forgot password?
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode('forgot');
+                    setResetStep('request');
+                    setError(null);
+                    setSuccessMsg(null);
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--primary)',
+                    fontSize: '0.78rem',
+                    cursor: 'pointer',
+                    padding: 0,
+                  }}
+                >
+                  Forgot password?
+                </button>
               </div>
               <PasswordInput
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                onBlur={() => {
-                  if (authMode === 'register') {
-                    setPasswordTouched(true);
-                  }
-                }}
-                hasError={showPasswordError}
                 required
               />
-              {showPasswordError && (
-                <div
-                  style={{
-                    marginTop: '0.45rem',
-                    fontSize: '0.8rem',
-                    color: '#F87171',
-                    lineHeight: 1.4,
-                  }}
-                >
-                  please provide a valid password
-                </div>
-              )}
             </div>
           )}
 
@@ -459,18 +423,14 @@ export default function LoginPage() {
           >
             {loading
               ? 'Processing...'
-              : authMode === 'register'
-                ? 'Register'
-                : authMode === 'forgot'
-                  ? 'Send Password Reset Link'
-                  : 'Sign In'}
+              : authMode === 'forgot'
+                ? 'Send Password Reset Link'
+                : 'Sign In'}
           </button>
         </form>
         )}
 
-
-
-        {/* OR Separator & Google Sign-In Container (Only for Sign-In and Register) */}
+        {/* OR Separator & Google Sign-In Container (Only for Sign-In) */}
         {authMode !== 'forgot' && (
           <div style={{ marginTop: '1.25rem' }}>
             <div style={{
@@ -490,48 +450,37 @@ export default function LoginPage() {
               suppressHydrationWarning
               style={{ display: 'flex', justifyContent: 'center', minHeight: '44px', width: '100%' }}
             />
+
+            {/* Account Provisioning Notice */}
+            <div style={{
+              marginTop: '1.75rem',
+              paddingTop: '1.25rem',
+              borderTop: '1px solid var(--border-color, rgba(255, 255, 255, 0.08))',
+              textAlign: 'center',
+              fontSize: '0.8rem',
+              color: 'var(--text-muted, #94A3B8)',
+              lineHeight: 1.5
+            }}>
+              Need an account? Accounts are provisioned by invitation. Please contact your organization to receive access.
+            </div>
           </div>
         )}
 
-        {/* Toggle Mode */}
-        {!(authMode === 'forgot' && resetStep === 'sent') && (
+        {/* Toggle Back to Sign In */}
+        {authMode === 'forgot' && resetStep === 'request' && (
           <div style={{
             marginTop: '1.5rem',
             textAlign: 'center',
             fontSize: '0.85rem',
             color: 'var(--text-muted)'
           }}>
-            {authMode === 'register' ? (
-              <>
-                Already have an account?{' '}
-                <button
-                  type="button"
-                  onClick={() => { setAuthMode('signin'); setError(null); setPasswordTouched(false); setFormSubmitted(false); }}
-                  style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontWeight: '600' }}
-                >
-                  Sign In
-                </button>
-              </>
-            ) : authMode === 'forgot' ? (
-              <button
-                type="button"
-                onClick={() => { setAuthMode('signin'); setError(null); setSuccessMsg(null); setPasswordTouched(false); setFormSubmitted(false); }}
-                style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontWeight: '600' }}
-              >
-                ← Back to Sign In
-              </button>
-            ) : (
-              <>
-                Need a new account?{' '}
-                <button
-                  type="button"
-                  onClick={() => { setAuthMode('register'); setError(null); setPasswordTouched(false); setFormSubmitted(false); }}
-                  style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontWeight: '600' }}
-                >
-                  Register Here
-                </button>
-              </>
-            )}
+            <button
+              type="button"
+              onClick={() => { setAuthMode('signin'); setError(null); setSuccessMsg(null); }}
+              style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontWeight: '600' }}
+            >
+              ← Back to Sign In
+            </button>
           </div>
         )}
       </div>

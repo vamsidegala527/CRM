@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { api, getAuthToken } from '../lib/api';
+import { formatUserFriendlyError } from '../lib/errorUtils';
 import { User } from '../types/employee';
 
 interface ChatbotWidgetProps {
@@ -1650,7 +1651,7 @@ export default function ChatbotWidget({ user, onEmployeeChange, onProfileUpdate 
                       gap: '0.5rem',
                     }}
                   >
-                    <span>{error.message || 'The AI assistant encountered a processing error. Please try again.'}</span>
+                    <span>{formatUserFriendlyError(error, 'Something went wrong. Please try again.')}</span>
                     <button
                       onClick={() => reload()}
                       style={{

@@ -156,9 +156,16 @@ def create_employee(
         address=payload.address,
         notes=payload.notes,
         phone=payload.phone,
+        emergency_contact=payload.emergency_contact,
+        experience_years=payload.experience_years,
+        previous_companies=payload.previous_companies,
+        previous_roles=payload.previous_roles,
+        skills=payload.skills,
+        education=payload.education,
+        certifications=payload.certifications,
         role="employee",
         is_active=True,
-        is_verified=False,
+        is_verified=True,
         first_login=True,
         is_setup_complete=False,
         setup_token_expires=setup_expires
@@ -213,6 +220,20 @@ def update_current_employee_profile(
         current_user.phone = payload.phone
     if payload.address is not None:
         current_user.address = payload.address
+    if payload.emergency_contact is not None:
+        current_user.emergency_contact = payload.emergency_contact
+    if payload.experience_years is not None:
+        current_user.experience_years = payload.experience_years
+    if payload.previous_companies is not None:
+        current_user.previous_companies = payload.previous_companies
+    if payload.previous_roles is not None:
+        current_user.previous_roles = payload.previous_roles
+    if payload.skills is not None:
+        current_user.skills = payload.skills
+    if payload.education is not None:
+        current_user.education = payload.education
+    if payload.certifications is not None:
+        current_user.certifications = payload.certifications
     db.commit()
     db.refresh(current_user)
     return current_user
@@ -254,8 +275,8 @@ def update_employee(
 ):
     """
     Update employee profile:
-    - Admin can update full_name, department, job_title, phone, company, address, notes, is_active.
-    - Employee can ONLY update their own full_name, department, phone, address.
+    - Admin can update full_name, department, job_title, phone, company, address, notes, is_active, career & education fields.
+    - Employee can update their own personal info, phone, address, emergency contact, career & education fields.
     - Roles cannot be modified by anyone via this endpoint.
     """
     employee = find_employee(id_or_pid, db)
@@ -277,6 +298,20 @@ def update_employee(
             employee.notes = update_data.notes
         if update_data.phone is not None:
             employee.phone = update_data.phone
+        if update_data.emergency_contact is not None:
+            employee.emergency_contact = update_data.emergency_contact
+        if update_data.experience_years is not None:
+            employee.experience_years = update_data.experience_years
+        if update_data.previous_companies is not None:
+            employee.previous_companies = update_data.previous_companies
+        if update_data.previous_roles is not None:
+            employee.previous_roles = update_data.previous_roles
+        if update_data.skills is not None:
+            employee.skills = update_data.skills
+        if update_data.education is not None:
+            employee.education = update_data.education
+        if update_data.certifications is not None:
+            employee.certifications = update_data.certifications
         if update_data.is_active is not None:
             if not update_data.is_active and employee.is_active:
                 # Deactivating employee: revoke sessions
@@ -303,6 +338,20 @@ def update_employee(
             employee.phone = self_data.phone
         if self_data.address is not None:
             employee.address = self_data.address
+        if self_data.emergency_contact is not None:
+            employee.emergency_contact = self_data.emergency_contact
+        if self_data.experience_years is not None:
+            employee.experience_years = self_data.experience_years
+        if self_data.previous_companies is not None:
+            employee.previous_companies = self_data.previous_companies
+        if self_data.previous_roles is not None:
+            employee.previous_roles = self_data.previous_roles
+        if self_data.skills is not None:
+            employee.skills = self_data.skills
+        if self_data.education is not None:
+            employee.education = self_data.education
+        if self_data.certifications is not None:
+            employee.certifications = self_data.certifications
 
         db.commit()
         db.refresh(employee)
@@ -367,7 +416,7 @@ def deactivate_employee(
         if not confirmed:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Permanent deletion requires explicit confirmation (confirmed=true)."
+                detail="Permanent deletion requires explicit confirmation."
             )
 
         emp_name = employee.full_name
