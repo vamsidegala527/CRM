@@ -319,46 +319,56 @@ def login_for_access_token(
 ):
     client_ip = get_client_ip(request)
     email_clean = user_credentials.email.strip().lower()
+    login_key = f"login:{email_clean}:{client_ip}"
 
-    # Rate limiting (IP level: 120 requests/min) and brute force account lockout (per email)
-    limiter.check_rate_limit(f"login_ip:{client_ip}", max_requests=120, window_seconds=60, action="login")
-    limiter.check_lockout(f"email:{email_clean}")
+    # 1. Check if this specific email+IP compound is locked out due to repeated failed attempts
+    limiter.check_lockout(login_key)
 
     user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
     
-    # 1. Unrecognized User: entered email does not belong to any employee/admin account
+    # 2. Unrecognized User: entered email does not belong to any employee/admin account
     if not user:
-        limiter.record_failure(f"email:{email_clean}", max_failures=10, lockout_seconds=120)
+        limiter.record_failure(
+            login_key,
+            max_failures=settings.RATE_LIMIT_MAX_FAILURES,
+            lockout_seconds=settings.RATE_LIMIT_LOCKOUT_SECONDS,
+            window_seconds=settings.RATE_LIMIT_WINDOW_SECONDS
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Your account was not found. Please contact company administrator to receive the account setup email."
         )
 
-    # 2. Deactivated / Inactive account check
+    # 3. Deactivated / Inactive account check
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Inactive account. Please contact system administrator."
         )
 
-    # 3. Setup Pending User: employee account exists but setup is still pending
+    # 4. Setup Pending User: employee account exists but setup is still pending
     if user.role == "employee" and not user.is_setup_complete:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Please complete your account setup. Check your email for the account setup instructions."
         )
 
-    # 4. Credential Verification for Setup Completed Employee & Admin
+    # 5. Credential Verification for Setup Completed Employee & Admin
     if not verify_password(user_credentials.password, user.hashed_password):
-        limiter.record_failure(f"email:{email_clean}", max_failures=10, lockout_seconds=120)
+        limiter.record_failure(
+            login_key,
+            max_failures=settings.RATE_LIMIT_MAX_FAILURES,
+            lockout_seconds=settings.RATE_LIMIT_LOCKOUT_SECONDS,
+            window_seconds=settings.RATE_LIMIT_WINDOW_SECONDS
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Authentication succeeded: reset failure trackers
-    limiter.record_success(f"email:{email_clean}")
+    # 6. Authentication succeeded: immediately reset failure tracker for this email+IP
+    limiter.record_success(login_key)
 
     # Track login count and first_login status
     current_count = user.login_count if user.login_count is not None else 0
@@ -399,7 +409,6 @@ def google_auth(
     db: Session = Depends(get_db)
 ):
     client_ip = get_client_ip(request)
-    limiter.check_rate_limit(f"google_ip:{client_ip}", max_requests=60, window_seconds=60, action="Google authentication")
 
     if not payload.id_token:
         raise HTTPException(
@@ -432,6 +441,8 @@ def google_auth(
         )
 
     email_clean = email.strip().lower()
+    google_key = f"google:{email_clean}:{client_ip}"
+    limiter.check_lockout(google_key)
 
     # Step 1: Check by google_id
     user = db.query(User).filter(User.google_id == google_user_id).first()
@@ -448,6 +459,12 @@ def google_auth(
             db.refresh(user)
         else:
             # Unrecognized user: do not create account automatically
+            limiter.record_failure(
+                google_key,
+                max_failures=settings.RATE_LIMIT_MAX_FAILURES,
+                lockout_seconds=settings.RATE_LIMIT_LOCKOUT_SECONDS,
+                window_seconds=settings.RATE_LIMIT_WINDOW_SECONDS
+            )
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Your account was not found. Please contact company administrator to receive the account setup email."
@@ -464,6 +481,9 @@ def google_auth(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Please complete your account setup. Check your email for the account setup instructions."
         )
+
+    # Authentication succeeded: reset failure tracker for this email+IP
+    limiter.record_success(google_key)
 
     # Clear any previous session revocation timestamp on successful Google sign-in
     user.token_revoked_at = None
