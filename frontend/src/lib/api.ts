@@ -6,32 +6,25 @@ import {
 import { formatUserFriendlyError } from './errorUtils';
 
 export function getApiBaseUrl(): string {
-  // In the browser on a deployed host (Render, Vercel, or custom domain):
-  // Return '/api/proxy' so browser requests are made to the frontend domain (same-origin),
-  // completely avoiding CORS issues and ensuring HttpOnly cookies work reliably across all browsers.
+  // In the browser, always route through '/api/proxy' (same-origin).
+  // This guarantees HttpOnly cookies work seamlessly across all browsers in both local dev and production,
+  // without needing any token storage in localStorage or sessionStorage.
   if (typeof window !== 'undefined') {
-    const hostname = window.location.hostname;
-    if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
-      return '/api/proxy';
-    }
+    return '/api/proxy';
   }
 
-  const envUrl = process.env.NEXT_PUBLIC_API_URL;
-  // If explicitly configured with a remote URL (not localhost or loopback) in server-side context
-  if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
-    return envUrl.replace(/\/+$/, '');
-  }
-  // Local development fallback
+  const envUrl = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL;
   return (envUrl || 'http://localhost:8000').replace(/\/+$/, '');
 }
 
-// In-memory token for ephemeral headers when available (token is securely stored in HttpOnly cookie)
+// In-memory token reference for ephemeral session context (JWT is securely stored strictly in HttpOnly cookies, never localStorage or sessionStorage)
 let inMemoryToken: string | null = null;
 
-// Wipe any legacy unsecure token from localStorage
+// Ensure no legacy tokens remain in localStorage or sessionStorage
 if (typeof window !== 'undefined') {
   try {
     localStorage.removeItem('access_token');
+    sessionStorage.removeItem('access_token');
   } catch (e) {}
 }
 
@@ -49,6 +42,7 @@ export function removeAuthToken(): void {
     try {
       localStorage.removeItem('access_token');
       localStorage.removeItem('user_info');
+      sessionStorage.removeItem('access_token');
     } catch (e) {}
   }
 }

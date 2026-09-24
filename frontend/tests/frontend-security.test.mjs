@@ -14,7 +14,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 
-const BACKEND_URL = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://backend:8000';
+const BACKEND_URL = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 let employeeToken = null;
 let employeeUser = null;

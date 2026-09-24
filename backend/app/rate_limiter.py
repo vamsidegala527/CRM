@@ -21,7 +21,7 @@ class RateLimiter:
             if not self._requests[key]:
                 del self._requests[key]
 
-    def check_rate_limit(self, key: str, max_requests: int = 60, window_seconds: int = 60, action: str = "requests"):
+    def check_rate_limit(self, key: str, max_requests: int = 120, window_seconds: int = 60, action: str = "requests"):
         if "testclient" in key:
             return
         now = time.time()
@@ -57,10 +57,10 @@ class RateLimiter:
                 # Lockout period expired, reset counter
                 del self._failed_attempts[identifier]
 
-    def record_failure(self, identifier: str, max_failures: int = 8, lockout_seconds: int = 300, window_seconds: int = 600):
+    def record_failure(self, identifier: str, max_failures: int = 10, lockout_seconds: int = 120, window_seconds: int = 600):
         """
         Record a failed authentication attempt with a sliding window (default 10 mins).
-        Only triggers a temporary lockout (default 5 mins) if max_failures is reached within the window.
+        Only triggers a temporary lockout (default 2 mins) if max_failures is reached within the window.
         """
         now = time.time()
         failed_times, lockout_until = self._failed_attempts.get(identifier, ([], 0.0))

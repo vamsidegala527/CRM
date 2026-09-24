@@ -13,7 +13,7 @@ client = TestClient(app)
 
 
 def test_01_registration_success():
-    unique_email = f"authreg_{uuid.uuid4().hex[:8]}@example.com"
+    unique_email = f"authreg_{uuid.uuid4().hex[:8]}@testcorp.com"
     payload = {
         "email": unique_email,
         "full_name": "Auth Reg Tester",
@@ -28,7 +28,7 @@ def test_01_registration_success():
 
 
 def test_02_registration_duplicate_email_409():
-    email = f"dup_{uuid.uuid4().hex[:8]}@example.com"
+    email = f"dup_{uuid.uuid4().hex[:8]}@testcorp.com"
     payload = {
         "email": email,
         "full_name": "Initial User",
@@ -47,7 +47,7 @@ def test_02_registration_duplicate_email_409():
 
 
 def test_03_login_valid_credentials():
-    email = f"validlogin_{uuid.uuid4().hex[:8]}@example.com"
+    email = f"validlogin_{uuid.uuid4().hex[:8]}@testcorp.com"
     pwd = "ValidPassword123!"
     reg_res = client.post("/api/auth/register", json={
         "email": email,
@@ -68,7 +68,7 @@ def test_03_login_valid_credentials():
 
 
 def test_04_login_invalid_password_401():
-    email = f"badlogin_{uuid.uuid4().hex[:8]}@example.com"
+    email = f"badlogin_{uuid.uuid4().hex[:8]}@testcorp.com"
     reg_res = client.post("/api/auth/register", json={
         "email": email,
         "full_name": "Bad Pwd User",
@@ -86,14 +86,14 @@ def test_04_login_invalid_password_401():
 
 
 def test_05_inactive_employee_login_rejection():
-    admin_email = f"admin_inact_{uuid.uuid4().hex[:8]}@example.com"
+    admin_email = f"admin_inact_{uuid.uuid4().hex[:8]}@testcorp.com"
     admin_pwd = "AdminPassword123!"
     client.post("/api/auth/register", json={"email": admin_email, "full_name": "Admin", "password": admin_pwd})
     admin_login = client.post("/api/auth/login", json={"email": admin_email, "password": admin_pwd})
     admin_token = admin_login.json()["access_token"]
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
 
-    emp_email = f"emp_deact_{uuid.uuid4().hex[:8]}@example.com"
+    emp_email = f"emp_deact_{uuid.uuid4().hex[:8]}@testcorp.com"
     create_res = client.post("/api/employees", json={
         "email": emp_email,
         "full_name": "Deact Employee",
@@ -138,7 +138,7 @@ def test_05_inactive_employee_login_rejection():
 
 
 def test_06_password_reset_flow():
-    email = f"reset_{uuid.uuid4().hex[:8]}@example.com"
+    email = f"reset_{uuid.uuid4().hex[:8]}@testcorp.com"
     pwd = "InitialPassword123!"
     client.post("/api/auth/register", json={"email": email, "full_name": "Reset User", "password": pwd})
 
@@ -176,7 +176,7 @@ def test_06_password_reset_flow():
 
 
 def test_07_email_verification_flow():
-    email = f"verify_{uuid.uuid4().hex[:8]}@example.com"
+    email = f"verify_{uuid.uuid4().hex[:8]}@testcorp.com"
     pwd = "VerifyPassword123!"
     client.post("/api/auth/register", json={"email": email, "full_name": "Verify User", "password": pwd})
 
@@ -210,7 +210,7 @@ def test_07_email_verification_flow():
 
 
 def test_08_token_revocation_on_logout():
-    email = f"logout_{uuid.uuid4().hex[:8]}@example.com"
+    email = f"logout_{uuid.uuid4().hex[:8]}@testcorp.com"
     pwd = "LogoutPassword123!"
     client.post("/api/auth/register", json={"email": email, "full_name": "Logout User", "password": pwd})
 
@@ -232,7 +232,7 @@ def test_08_token_revocation_on_logout():
 
 
 def test_09_token_revocation_on_password_change():
-    email = f"pwdchange_{uuid.uuid4().hex[:8]}@example.com"
+    email = f"pwdchange_{uuid.uuid4().hex[:8]}@testcorp.com"
     pwd = "OldPassword123!"
     client.post("/api/auth/register", json={"email": email, "full_name": "Pwd Change User", "password": pwd})
 
@@ -264,14 +264,14 @@ def test_10_expired_or_invalid_jwt_rejection():
 
 
 def test_11_reactivation_jwt_security():
-    admin_email = f"admin_react_{uuid.uuid4().hex[:8]}@example.com"
+    admin_email = f"admin_react_{uuid.uuid4().hex[:8]}@testcorp.com"
     admin_pwd = "AdminPassword123!"
     client.post("/api/auth/register", json={"email": admin_email, "full_name": "Admin", "password": admin_pwd})
     admin_login = client.post("/api/auth/login", json={"email": admin_email, "password": admin_pwd})
     admin_token = admin_login.json()["access_token"]
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
 
-    emp_email = f"emp_react_{uuid.uuid4().hex[:8]}@example.com"
+    emp_email = f"emp_react_{uuid.uuid4().hex[:8]}@testcorp.com"
     create_res = client.post("/api/employees", json={
         "email": emp_email,
         "full_name": "Reactivate Target",

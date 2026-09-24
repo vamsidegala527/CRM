@@ -33,17 +33,13 @@ def get_password_hash(password: str) -> str:
     salt = bcrypt.gensalt()
     return bcrypt.hashpw(pwd_bytes, salt).decode('utf-8')
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None, iat_override: Optional[int] = None) -> str:
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
     now = datetime.now(timezone.utc)
-    if expires_delta:
-        expire = now + expires_delta
-    else:
-        expire = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    iat_val = iat_override if iat_override is not None else int(now.timestamp())
+    expire = now + expires_delta if expires_delta else now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({
         "exp": expire,
-        "iat": iat_val,
+        "iat": int(now.timestamp()),
         "jti": str(uuid.uuid4())
     })
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
@@ -60,8 +56,14 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     
-    # 1. Check HttpOnly cookie first, then Bearer token
-    raw_token = request.cookies.get("access_token") or token
+    # 1. Prioritize JWT Bearer token from Authorization header, fallback to HttpOnly cookie
+    raw_token = token
+    if not raw_token:
+        auth_hdr = request.headers.get("Authorization") or request.headers.get("authorization")
+        if auth_hdr and auth_hdr.strip().startswith("Bearer "):
+            raw_token = auth_hdr.strip()[7:].strip()
+    if not raw_token:
+        raw_token = request.cookies.get("access_token")
     if not raw_token:
         raise credentials_exception
     
@@ -75,6 +77,12 @@ def get_current_user(
         if email is None:
             raise credentials_exception
         token_data = TokenData(email=email)
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired. Please log in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     except JWTError:
         raise credentials_exception
     
@@ -164,6 +172,7 @@ def verify_employee_setup_token(token_str: str, submitted_email: Optional[str], 
     4. Fallback lookup by email if valid unexpired invitation exists.
     """
     import hashlib
+    # pyrefly: ignore [missing-import]
     from sqlalchemy import func
     clean_token = token_str.strip()
     if not clean_token:

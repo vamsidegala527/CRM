@@ -144,22 +144,16 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!mounted) return;
-    const stored = getStoredUser();
-    if (!stored) {
-      router.push('/login');
-      return;
-    }
     checkAuth();
-  }, [mounted, checkAuth, router]);
+  }, [mounted, checkAuth]);
 
   const handleLogout = async () => {
     try {
       await api.logout();
     } catch {
-      // ignore
+      removeAuthToken();
+      router.push('/login');
     }
-    removeAuthToken();
-    router.push('/login');
   };
 
   // Fetch Employee Metrics (independent from search, filters, and pagination)

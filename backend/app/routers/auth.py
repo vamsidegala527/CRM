@@ -48,19 +48,18 @@ router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
 IS_PROD = (
     os.getenv("ENVIRONMENT", "").lower() in ("production", "prod") or
-    os.getenv("RENDER", "").lower() == "true"
+    os.getenv("RENDER", "").lower() == "true" or
+    os.getenv("COOKIE_SECURE", "false").lower() == "true"
 )
 
 def set_auth_cookie(response: Response, token: str):
-    """Sets a secure HttpOnly, SameSite=Lax cookie containing the JWT access token."""
+    """Sets an HttpOnly, SameSite=Lax cookie containing the JWT access token."""
     max_age = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
-    # True by default; in local dev HTTP it can be relaxed if explicitly configured
-    is_secure = os.getenv("COOKIE_SECURE", "false" if os.getenv("ENVIRONMENT") == "development" else "true").lower() == "true"
     response.set_cookie(
         key="access_token",
         value=token,
         httponly=True,
-        secure=is_secure,
+        secure=IS_PROD,
         samesite="lax",
         max_age=max_age,
         path="/"
@@ -321,15 +320,15 @@ def login_for_access_token(
     client_ip = get_client_ip(request)
     email_clean = user_credentials.email.strip().lower()
 
-    # Rate limiting (IP level: 60 requests/min) and brute force account lockout (per email)
-    limiter.check_rate_limit(f"login_ip:{client_ip}", max_requests=60, window_seconds=60, action="login")
+    # Rate limiting (IP level: 120 requests/min) and brute force account lockout (per email)
+    limiter.check_rate_limit(f"login_ip:{client_ip}", max_requests=120, window_seconds=60, action="login")
     limiter.check_lockout(f"email:{email_clean}")
 
     user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
     
     # 1. Unrecognized User: entered email does not belong to any employee/admin account
     if not user:
-        limiter.record_failure(f"email:{email_clean}", max_failures=8, lockout_seconds=300)
+        limiter.record_failure(f"email:{email_clean}", max_failures=10, lockout_seconds=120)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Your account was not found. Please contact company administrator to receive the account setup email."
@@ -351,7 +350,7 @@ def login_for_access_token(
 
     # 4. Credential Verification for Setup Completed Employee & Admin
     if not verify_password(user_credentials.password, user.hashed_password):
-        limiter.record_failure(f"email:{email_clean}", max_failures=8, lockout_seconds=300)
+        limiter.record_failure(f"email:{email_clean}", max_failures=10, lockout_seconds=120)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password.",
@@ -372,18 +371,14 @@ def login_for_access_token(
         user.login_count = current_count + 1
         user.first_login = False
 
+    # Clear any previous session revocation timestamp on successful new login
+    user.token_revoked_at = None
     db.commit()
     db.refresh(user)
 
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    iat_override = None
-    if user.token_revoked_at:
-        min_iat = int(user.token_revoked_at.timestamp()) + 1
-        now_iat = int(datetime.utcnow().timestamp())
-        iat_override = max(now_iat, min_iat)
-
     access_token = create_access_token(
-        data={"sub": user.email}, expires_delta=access_token_expires, iat_override=iat_override
+        data={"sub": user.email}, expires_delta=access_token_expires
     )
 
     # Set secure HttpOnly cookie on response
@@ -470,15 +465,14 @@ def google_auth(
             detail="Please complete your account setup. Check your email for the account setup instructions."
         )
 
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    iat_override = None
-    if user.token_revoked_at:
-        min_iat = int(user.token_revoked_at.timestamp()) + 1
-        now_iat = int(datetime.utcnow().timestamp())
-        iat_override = max(now_iat, min_iat)
+    # Clear any previous session revocation timestamp on successful Google sign-in
+    user.token_revoked_at = None
+    db.commit()
+    db.refresh(user)
 
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.email}, expires_delta=access_token_expires, iat_override=iat_override
+        data={"sub": user.email}, expires_delta=access_token_expires
     )
 
     # Set secure HttpOnly cookie on response
@@ -510,12 +504,11 @@ def logout_user(
     except Exception:
         pass  # Session already expired or missing; still clear cookie
 
-    is_secure = os.getenv("COOKIE_SECURE", "false" if os.getenv("ENVIRONMENT") == "development" else "true").lower() == "true"
     response.delete_cookie(
         key="access_token",
         path="/",
         httponly=True,
-        secure=is_secure,
+        secure=IS_PROD,
         samesite="lax"
     )
     return {"message": "Logged out successfully. Session invalidated."}
