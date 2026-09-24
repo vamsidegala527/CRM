@@ -27,6 +27,23 @@ if current_dir not in sys.path:
 from app.database import SessionLocal
 from app.models import User
 from app.auth import get_password_hash
+from app.config import settings
+
+def set_custom_db_url(url: str):
+    global SessionLocal
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    eng = create_engine(url, pool_pre_ping=True)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=eng)
+
+def get_db_display_name() -> str:
+    url = getattr(settings, "DATABASE_URL", "")
+    if "postgres:5432" in url or "localhost:5432" in url or "127.0.0.1:5432" in url:
+        return "Local Docker DB (hr_db_container)"
+    parts = url.split("@")
+    if len(parts) > 1:
+        return f"Remote/Production DB ({parts[-1]})"
+    return "Remote DB"
 
 
 EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -207,17 +224,20 @@ def delete_admin(email: str, force: bool = False) -> bool:
 def interactive_menu():
     """Interactive Developer CLI Menu."""
     while True:
-        print("\n" + "=" * 50)
+        db_label = get_db_display_name()
+        print("\n" + "=" * 55)
         print("  HR PORTAL - ADMIN ACCOUNT MANAGEMENT")
-        print("=" * 50)
+        print(f"  Target Database: {db_label}")
+        print("=" * 55)
         print(" 1. List all Admin accounts")
         print(" 2. Create a new Admin account")
         print(" 3. Update an Admin (Password, Name, Status)")
         print(" 4. Delete an Admin account")
-        print(" 5. Exit")
-        print("=" * 50)
+        print(" 5. Switch Database (Connect to Production DB URL)")
+        print(" 6. Exit")
+        print("=" * 55)
 
-        choice = input("Enter choice (1-5): ").strip()
+        choice = input("Enter choice (1-6): ").strip()
 
         if choice == "1":
             list_admins()
@@ -253,11 +273,22 @@ def interactive_menu():
             print("\n--- Delete Admin Account ---")
             email = input("Enter admin email to delete: ").strip()
             delete_admin(email=email)
-        elif choice in ["5", "q", "exit"]:
+        elif choice == "5":
+            print("\n--- Switch Target Database ---")
+            print("Enter your Production Database URL (e.g. from Render / Supabase / Neon):")
+            new_url = input("DATABASE_URL: ").strip()
+            if new_url:
+                try:
+                    set_custom_db_url(new_url)
+                    settings.DATABASE_URL = new_url
+                    print("✅ Successfully switched database connection!")
+                except Exception as e:
+                    print(f"❌ Failed to connect: {e}")
+        elif choice in ["6", "q", "exit"]:
             print("Goodbye.")
             break
         else:
-            print("[ERROR] Invalid selection, please enter 1 to 5.")
+            print("[ERROR] Invalid selection, please enter 1 to 6.")
 
 
 def main():
@@ -269,10 +300,14 @@ Examples:
   # Interactive mode:
   python manage_admin.py
 
-  # List admins:
+  # Target Production Database directly:
+  python manage_admin.py --db-url "postgresql://user:pass@host/dbname" list
+  python manage_admin.py --db-url "postgresql://user:pass@host/dbname" create --email admin@company.com --name "Super Admin" --password "SecurePass123!"
+
+  # List admins locally:
   python manage_admin.py list
 
-  # Create an admin:
+  # Create an admin locally:
   python manage_admin.py create --email admin@company.com --name "Super Admin" --password "SecurePass123!"
 
   # Update an admin password:
@@ -283,6 +318,7 @@ Examples:
         """
     )
 
+    parser.add_argument("--db-url", required=False, help="Custom database connection string (e.g. production PostgreSQL URL)")
     subparsers = parser.add_subparsers(dest="command", help="Sub-commands")
 
     # List
@@ -309,6 +345,10 @@ Examples:
     delete_parser.add_argument("-f", "--force", action="store_true", help="Force deletion without confirmation prompt")
 
     args = parser.parse_args()
+
+    if args.db_url:
+        set_custom_db_url(args.db_url)
+        settings.DATABASE_URL = args.db_url
 
     if not args.command:
         interactive_menu()

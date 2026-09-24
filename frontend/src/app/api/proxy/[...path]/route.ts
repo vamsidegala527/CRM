@@ -25,13 +25,16 @@ async function handler(request: NextRequest, { params }: { params: { path: strin
     headers.set('origin', url.origin);
   }
 
-  // Ensure real client IP is forwarded so backend rate limiter does not throttle the proxy instance
-  const clientIp = request.headers.get('cf-connecting-ip') || 
-                   request.headers.get('x-forwarded-for') || 
-                   request.headers.get('x-real-ip') || 
+  // Ensure real client IP is forwarded so backend rate limiter identifies the real user
+  const clientIp = request.headers.get('x-real-ip') ||
+                   (request.headers.get('x-forwarded-for') ? request.headers.get('x-forwarded-for')!.split(',')[0].trim() : '') ||
+                   request.headers.get('cf-connecting-ip') ||
                    (request as any).ip;
-  if (clientIp && !headers.get('x-forwarded-for')) {
-    headers.set('x-forwarded-for', clientIp);
+  if (clientIp) {
+    headers.set('x-real-ip', clientIp);
+    if (!headers.get('x-forwarded-for')) {
+      headers.set('x-forwarded-for', clientIp);
+    }
   }
 
   const controller = new AbortController();

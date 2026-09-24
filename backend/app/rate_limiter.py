@@ -87,27 +87,27 @@ limiter = RateLimiter()
 
 def get_client_ip(request: Request) -> str:
     """Extract real client IP considering reverse proxy and CDN headers."""
-    # 1. Cloudflare / Render CDN edge connecting IP
-    cf_ip = request.headers.get("CF-Connecting-IP")
+    # 1. Standard X-Forwarded-For header (first entry is original end-user client)
+    forwarded_for = request.headers.get("X-Forwarded-For") or request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        ips = [ip.strip() for ip in forwarded_for.split(",") if ip.strip()]
+        if ips and ips[0] and ips[0].lower() != "unknown":
+            return ips[0]
+
+    # 2. Standard X-Real-IP header
+    real_ip = request.headers.get("X-Real-IP") or request.headers.get("x-real-ip")
+    if real_ip and real_ip.strip():
+        return real_ip.strip()
+
+    # 3. Cloudflare / Render CDN edge connecting IP
+    cf_ip = request.headers.get("CF-Connecting-IP") or request.headers.get("cf-connecting-ip")
     if cf_ip and cf_ip.strip():
         return cf_ip.strip()
 
-    # 2. True-Client-IP header (Akamai / Cloudflare Enterprise)
-    true_ip = request.headers.get("True-Client-IP")
+    # 4. True-Client-IP header (Akamai / Cloudflare Enterprise)
+    true_ip = request.headers.get("True-Client-IP") or request.headers.get("true-client-ip")
     if true_ip and true_ip.strip():
         return true_ip.strip()
-
-    # 3. Standard X-Forwarded-For header (first entry is original client)
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        ips = [ip.strip() for ip in forwarded_for.split(",") if ip.strip()]
-        if ips:
-            return ips[0]
-
-    # 4. Standard X-Real-IP header
-    real_ip = request.headers.get("X-Real-IP")
-    if real_ip and real_ip.strip():
-        return real_ip.strip()
 
     # 5. Direct client host fallback
     return request.client.host if request.client else "127.0.0.1"

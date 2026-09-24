@@ -244,8 +244,8 @@ export default function LoginPage() {
           <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
             {authMode === 'forgot'
               ? (resetStep === 'request'
-                  ? 'Enter your registered email to receive a password-reset link'
-                  : 'Check your inbox for the reset link')
+                ? 'Enter your registered email to receive a password-reset link'
+                : 'Check your inbox for the reset link')
               : 'Sign in to your organization account'}
           </p>
         </div>
@@ -338,96 +338,96 @@ export default function LoginPage() {
             </button>
           </div>
         ) : (
-        /* Form */
-        <form onSubmit={handleSubmit}>
-          {authMode === 'signin' && (
-            <div className="form-group">
-              <label className="form-label">Email Address</label>
-              <input
-                type="email"
-                className="form-control"
-                placeholder="name@company.com"
-                value={email}
-                onChange={(e) => handleEmailChange(e.target.value)}
-                onBlur={handleEmailBlur}
-                style={emailError ? { borderColor: 'var(--accent-rose, #F43F5E)' } : undefined}
-                required
-              />
-              {emailError && (
-                <span style={{ display: 'block', fontSize: '0.78rem', color: '#F43F5E', marginTop: '0.35rem' }}>
-                  {emailError}
-                </span>
-              )}
-            </div>
-          )}
-
-          {authMode === 'forgot' && resetStep === 'request' && (
-            <div className="form-group">
-              <label className="form-label">Email Address</label>
-              <input
-                type="email"
-                className="form-control"
-                placeholder="Enter your account email"
-                value={email}
-                onChange={(e) => handleEmailChange(e.target.value)}
-                onBlur={handleEmailBlur}
-                style={emailError ? { borderColor: 'var(--accent-rose, #F43F5E)' } : undefined}
-                required
-              />
-              {emailError && (
-                <span style={{ display: 'block', fontSize: '0.78rem', color: '#F43F5E', marginTop: '0.35rem' }}>
-                  {emailError}
-                </span>
-              )}
-            </div>
-          )}
-
-          {authMode === 'signin' && (
-            <div className="form-group">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <label className="form-label">Password</label>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthMode('forgot');
-                    setResetStep('request');
-                    setError(null);
-                    setSuccessMsg(null);
-                  }}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--primary)',
-                    fontSize: '0.78rem',
-                    cursor: 'pointer',
-                    padding: 0,
-                  }}
-                >
-                  Forgot password?
-                </button>
+          /* Form */
+          <form onSubmit={handleSubmit}>
+            {authMode === 'signin' && (
+              <div className="form-group">
+                <label className="form-label">Email Address</label>
+                <input
+                  type="email"
+                  className="form-control"
+                  placeholder="name@company.com"
+                  value={email}
+                  onChange={(e) => handleEmailChange(e.target.value)}
+                  onBlur={handleEmailBlur}
+                  style={emailError ? { borderColor: 'var(--accent-rose, #F43F5E)' } : undefined}
+                  required
+                />
+                {emailError && (
+                  <span style={{ display: 'block', fontSize: '0.78rem', color: '#F43F5E', marginTop: '0.35rem' }}>
+                    {emailError}
+                  </span>
+                )}
               </div>
-              <PasswordInput
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </div>
-          )}
+            )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="btn btn-primary"
-            style={{ width: '100%', padding: '0.85rem', marginTop: '0.5rem', fontSize: '0.95rem' }}
-          >
-            {loading
-              ? 'Processing...'
-              : authMode === 'forgot'
-                ? 'Send Password Reset Link'
-                : 'Sign In'}
-          </button>
-        </form>
+            {authMode === 'forgot' && resetStep === 'request' && (
+              <div className="form-group">
+                <label className="form-label">Email Address</label>
+                <input
+                  type="email"
+                  className="form-control"
+                  placeholder="Enter your account email"
+                  value={email}
+                  onChange={(e) => handleEmailChange(e.target.value)}
+                  onBlur={handleEmailBlur}
+                  style={emailError ? { borderColor: 'var(--accent-rose, #F43F5E)' } : undefined}
+                  required
+                />
+                {emailError && (
+                  <span style={{ display: 'block', fontSize: '0.78rem', color: '#F43F5E', marginTop: '0.35rem' }}>
+                    {emailError}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {authMode === 'signin' && (
+              <div className="form-group">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label className="form-label">Password</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('forgot');
+                      setResetStep('request');
+                      setError(null);
+                      setSuccessMsg(null);
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--primary)',
+                      fontSize: '0.78rem',
+                      cursor: 'pointer',
+                      padding: 0,
+                    }}
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+                <PasswordInput
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="btn btn-primary"
+              style={{ width: '100%', padding: '0.85rem', marginTop: '0.5rem', fontSize: '0.95rem' }}
+            >
+              {loading
+                ? 'Processing...'
+                : authMode === 'forgot'
+                  ? 'Send Password Reset Link'
+                  : 'Sign In'}
+            </button>
+          </form>
         )}
 
         {/* OR Separator & Google Sign-In Container (Only for Sign-In) */}
@@ -450,19 +450,6 @@ export default function LoginPage() {
               suppressHydrationWarning
               style={{ display: 'flex', justifyContent: 'center', minHeight: '44px', width: '100%' }}
             />
-
-            {/* Account Provisioning Notice */}
-            <div style={{
-              marginTop: '1.75rem',
-              paddingTop: '1.25rem',
-              borderTop: '1px solid var(--border-color, rgba(255, 255, 255, 0.08))',
-              textAlign: 'center',
-              fontSize: '0.8rem',
-              color: 'var(--text-muted, #94A3B8)',
-              lineHeight: 1.5
-            }}>
-              Need an account? Accounts are provisioned by invitation. Please contact your organization to receive access.
-            </div>
           </div>
         )}
 
