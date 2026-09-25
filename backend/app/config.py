@@ -16,9 +16,9 @@ class Settings(BaseSettings):
     BREVO_SENDER_NAME: str = "HR & Employee Management Portal"
 
     # Rate Limiter Configuration (Configurable via Environment Variables)
-    RATE_LIMIT_MAX_FAILURES: int = 10
-    RATE_LIMIT_LOCKOUT_SECONDS: int = 120
-    RATE_LIMIT_WINDOW_SECONDS: int = 600
+    RATE_LIMIT_MAX_FAILURES: int = 15
+    RATE_LIMIT_LOCKOUT_SECONDS: int = 60
+    RATE_LIMIT_WINDOW_SECONDS: int = 300
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

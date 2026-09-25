@@ -321,13 +321,11 @@ def login_for_access_token(
     email_clean = user_credentials.email.strip().lower()
     login_key = f"login:{email_clean}:{client_ip}"
 
-    # 1. Check if this specific email+IP compound is locked out due to repeated failed attempts
-    limiter.check_lockout(login_key)
-
     user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
     
-    # 2. Unrecognized User: entered email does not belong to any employee/admin account
+    # 1. Unrecognized User: entered email does not belong to any employee/admin account
     if not user:
+        limiter.check_lockout(login_key)
         limiter.record_failure(
             login_key,
             max_failures=settings.RATE_LIMIT_MAX_FAILURES,
@@ -339,22 +337,23 @@ def login_for_access_token(
             detail="Your account was not found. Please contact company administrator to receive the account setup email."
         )
 
-    # 3. Deactivated / Inactive account check
+    # 2. Deactivated / Inactive account check
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Inactive account. Please contact system administrator."
         )
 
-    # 4. Setup Pending User: employee account exists but setup is still pending
+    # 3. Setup Pending User: employee account exists but setup is still pending
     if user.role == "employee" and not user.is_setup_complete:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Please complete your account setup. Check your email for the account setup instructions."
         )
 
-    # 5. Credential Verification for Setup Completed Employee & Admin
+    # 4. Credential Verification: Check password before lockout enforcement
     if not verify_password(user_credentials.password, user.hashed_password):
+        limiter.check_lockout(login_key)
         limiter.record_failure(
             login_key,
             max_failures=settings.RATE_LIMIT_MAX_FAILURES,
@@ -367,7 +366,7 @@ def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # 6. Authentication succeeded: immediately reset failure tracker for this email+IP
+    # 5. Authentication succeeded: immediately reset failure tracker for this email+IP
     limiter.record_success(login_key)
 
     # Track login count and first_login status
@@ -442,7 +441,6 @@ def google_auth(
 
     email_clean = email.strip().lower()
     google_key = f"google:{email_clean}:{client_ip}"
-    limiter.check_lockout(google_key)
 
     # Step 1: Check by google_id
     user = db.query(User).filter(User.google_id == google_user_id).first()
@@ -459,6 +457,7 @@ def google_auth(
             db.refresh(user)
         else:
             # Unrecognized user: do not create account automatically
+            limiter.check_lockout(google_key)
             limiter.record_failure(
                 google_key,
                 max_failures=settings.RATE_LIMIT_MAX_FAILURES,
