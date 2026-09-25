@@ -53,10 +53,10 @@ export function formatUserFriendlyError(error: any, fallback: string = 'Somethin
   if (status === 429) {
     const secondsMatch = (msg || '').match(/(\d+)\s*(?:seconds|secs|s)/i);
     if (secondsMatch) {
-      return `Too many sign-in attempts. Please wait ${secondsMatch[1]} seconds before trying again.`;
+      return `Too many requests. Please wait ${secondsMatch[1]} seconds before trying again.`;
     }
     if (!lowerMsg.includes('locked') && !lowerMsg.includes('retry after')) {
-      return 'Too many sign-in attempts. Please wait a moment.';
+      return 'Too many requests. Please wait a moment before trying again.';
     }
   }
 

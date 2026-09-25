@@ -151,7 +151,7 @@ async function request<T>(
         if (response.status === 401 && typeof window !== 'undefined') {
           removeAuthToken();
           const currentPath = window.location.pathname;
-          const isPublicAuthPage = ['/login', '/register', '/verify-email', '/reset-password', '/forgot-password']
+          const isPublicAuthPage = ['/login', '/verify-email', '/reset-password', '/forgot-password']
             .some((p) => currentPath.startsWith(p));
           if (!isPublicAuthPage) {
             window.location.href = '/login';
@@ -214,13 +214,6 @@ export const api = {
     setAuthToken(res.access_token);
     setStoredUser(res.user);
     return res;
-  },
-
-  async register(userData: { email: string; password: string; full_name: string }): Promise<any> {
-    return request<any>('/api/auth/register', {
-      method: 'POST',
-      body: JSON.stringify(userData),
-    });
   },
 
   async verifyEmail(codeOrToken: string): Promise<{ message: string; is_verified: boolean; email?: string }> {

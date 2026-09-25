@@ -83,75 +83,9 @@ def get_frontend_base_url(request: Request) -> str:
     return settings.FRONTEND_URL.strip().rstrip('/')
 
 
-@router.post("/register", response_model=dict, status_code=status.HTTP_201_CREATED)
-def register_user(
-    request: Request,
-    response: Response,
-    user_in: UserCreate,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
-):
-    client_ip = get_client_ip(request)
-    limiter.check_rate_limit(f"register_ip:{client_ip}", max_requests=30, window_seconds=60, action="registration")
-
-    email_clean = user_in.email.strip().lower()
-    
-    # Case-insensitive check for existing user
-    existing_user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
-    
-    hashed_pwd = get_password_hash(user_in.password)
-    # Generate secure 6-digit verification code
-    verification_code = f"{secrets.randbelow(1000000):06d}"
-    verification_expires = datetime.utcnow() + timedelta(hours=24)
-
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A user account with this email address already exists."
-        )
-    else:
-        db_user = User(
-            email=email_clean,
-            full_name=user_in.full_name,
-            hashed_password=hashed_pwd,
-            is_active=True,
-            is_verified=False,
-            first_login=True,
-            login_count=0,
-            verification_token=verification_code,
-            verification_token_expires=verification_expires,
-            role="admin",
-            is_setup_complete=True
-        )
-        db.add(db_user)
-        db.commit()
-        db.refresh(db_user)
-
-    fe_url = get_frontend_base_url(request)
-    background_tasks.add_task(
-        safe_send_verification_email,
-        db_user.email,
-        db_user.full_name or "User",
-        verification_code,
-        fe_url
-    )
-
-    return {
-        "message": f"Account created successfully. Verification code sent to {db_user.email}.",
-        "id": db_user.id,
-        "email": db_user.email,
-        "full_name": db_user.full_name,
-        "user": UserResponse.model_validate(db_user),
-        "verification_token": verification_code if not IS_PROD else None
-    }
-
-
 @router.post("/verify-email", status_code=status.HTTP_200_OK)
 def verify_email(request: Request, payload: VerifyEmailRequest, db: Session = Depends(get_db)):
     """Verifies a user's email address using a valid 6-digit verification code or token."""
-    client_ip = get_client_ip(request)
-    limiter.check_rate_limit(f"verify_ip:{client_ip}", max_requests=30, window_seconds=300, action="verification attempt")
-
     import urllib.parse
     raw_code = (payload.code or payload.token or "").strip()
     if not raw_code:
@@ -196,9 +130,6 @@ def resend_verification(
     db: Session = Depends(get_db)
 ):
     """Generates and resends a 6-digit email verification code to a registered user in background."""
-    client_ip = get_client_ip(request)
-    limiter.check_rate_limit(f"resend_verify:{client_ip}", max_requests=15, window_seconds=300, action="verification resend")
-
     email_clean = payload.email.strip().lower()
     user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
     
@@ -239,9 +170,6 @@ def forgot_password(
     db: Session = Depends(get_db)
 ):
     """Generates a secure password reset token and dispatches reset email in background."""
-    client_ip = get_client_ip(request)
-    limiter.check_rate_limit(f"forgot_pwd:{client_ip}", max_requests=15, window_seconds=300, action="password reset request")
-
     email_clean = payload.email.strip().lower()
     user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
 
@@ -317,9 +245,8 @@ def login_for_access_token(
     user_credentials: UserLogin,
     db: Session = Depends(get_db)
 ):
-    client_ip = get_client_ip(request)
     email_clean = user_credentials.email.strip().lower()
-    login_key = f"login:{email_clean}:{client_ip}"
+    login_key = f"login:{email_clean}"
 
     user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
     
@@ -366,7 +293,7 @@ def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # 5. Authentication succeeded: immediately reset failure tracker for this email+IP
+    # 5. Authentication succeeded: immediately reset failure tracker for this email
     limiter.record_success(login_key)
 
     # Track login count and first_login status
@@ -407,8 +334,6 @@ def google_auth(
     payload: GoogleAuthRequest,
     db: Session = Depends(get_db)
 ):
-    client_ip = get_client_ip(request)
-
     if not payload.id_token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -440,7 +365,7 @@ def google_auth(
         )
 
     email_clean = email.strip().lower()
-    google_key = f"google:{email_clean}:{client_ip}"
+    google_key = f"google:{email_clean}"
 
     # Step 1: Check by google_id
     user = db.query(User).filter(User.google_id == google_user_id).first()
@@ -481,7 +406,7 @@ def google_auth(
             detail="Please complete your account setup. Check your email for the account setup instructions."
         )
 
-    # Authentication succeeded: reset failure tracker for this email+IP
+    # Authentication succeeded: reset failure tracker for this email
     limiter.record_success(google_key)
 
     # Clear any previous session revocation timestamp on successful Google sign-in
@@ -550,9 +475,6 @@ def setup_employee_account(
     - Validates link expiration and email match.
     - Sets password, sets is_setup_complete=True, and invalidates the token.
     """
-    client_ip = get_client_ip(request)
-    limiter.check_rate_limit(f"setup_ip:{client_ip}", max_requests=30, window_seconds=300, action="employee setup attempt")
-
     token_raw = payload.token.strip()
     submitted_email = payload.email.strip().lower()
 
