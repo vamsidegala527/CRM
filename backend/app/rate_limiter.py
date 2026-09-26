@@ -57,10 +57,10 @@ class RateLimiter:
                 # Lockout period expired, reset counter
                 del self._failed_attempts[identifier]
 
-    def record_failure(self, identifier: str, max_failures: int = 15, lockout_seconds: int = 60, window_seconds: int = 300):
+    def record_failure(self, identifier: str, max_failures: int = 30, lockout_seconds: int = 30, window_seconds: int = 180):
         """
-        Record a failed authentication attempt with a sliding window (default 5 mins).
-        Only triggers a temporary lockout (default 1 min) if max_failures is reached within the window.
+        Record a failed authentication attempt with a sliding window (default 3 mins).
+        Only triggers a temporary lockout (default 30s) if max_failures is reached within the window.
         """
         now = time.time()
         failed_times, lockout_until = self._failed_attempts.get(identifier, ([], 0.0))

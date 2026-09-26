@@ -252,13 +252,6 @@ def login_for_access_token(
     
     # 1. Unrecognized User: entered email does not belong to any employee/admin account
     if not user:
-        limiter.check_lockout(login_key)
-        limiter.record_failure(
-            login_key,
-            max_failures=settings.RATE_LIMIT_MAX_FAILURES,
-            lockout_seconds=settings.RATE_LIMIT_LOCKOUT_SECONDS,
-            window_seconds=settings.RATE_LIMIT_WINDOW_SECONDS
-        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Your account was not found. Please contact company administrator to receive the account setup email."
@@ -382,13 +375,6 @@ def google_auth(
             db.refresh(user)
         else:
             # Unrecognized user: do not create account automatically
-            limiter.check_lockout(google_key)
-            limiter.record_failure(
-                google_key,
-                max_failures=settings.RATE_LIMIT_MAX_FAILURES,
-                lockout_seconds=settings.RATE_LIMIT_LOCKOUT_SECONDS,
-                window_seconds=settings.RATE_LIMIT_WINDOW_SECONDS
-            )
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Your account was not found. Please contact company administrator to receive the account setup email."
