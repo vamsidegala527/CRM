@@ -123,24 +123,29 @@ export default function DashboardPage() {
     return () => clearInterval(timer);
   }, [authChecking]);
 
-  // Auth Guard with Cold Start & Retry Support
+  // Auth Guard with Immediate Redirect Support
   const checkAuth = useCallback(async () => {
     setAuthError(null);
     setAuthChecking(true);
     try {
       const user = await api.getCurrentUser();
+      if (!user) {
+        setAuthChecking(false);
+        if (typeof window !== 'undefined') {
+          window.location.href = '/login';
+        }
+        return;
+      }
       setCurrentUser(user);
       setStoredUser(user);
       setAuthChecking(false);
     } catch (err: any) {
-      if (err.status === 401 || err.message?.includes('401') || err.message?.includes('credentials')) {
-        router.push('/login');
-      } else {
-        setAuthError(err.message || 'Server is waking up. Please try again in a few moments.');
-      }
       setAuthChecking(false);
+      if (typeof window !== 'undefined') {
+        window.location.href = '/login';
+      }
     }
-  }, [router]);
+  }, []);
 
   useEffect(() => {
     if (!mounted) return;
@@ -382,29 +387,8 @@ export default function DashboardPage() {
     setIsEmployeeDetailOpen(true);
   };
 
-  if (!mounted) {
-    return (
-      <div style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'var(--bg-main, #0B0F19)',
-      }}>
-        <div style={{
-          width: '36px',
-          height: '36px',
-          border: '3px solid rgba(99, 102, 241, 0.2)',
-          borderTopColor: '#6366F1',
-          borderRadius: '50%',
-          animation: 'spin 0.8s linear infinite'
-        }} />
-        <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
-      </div>
-    );
-  }
-
-  if (authChecking && !currentUser) {
+  // Strict Auth & Render Guard: Never render Dashboard or Navbar without authenticated currentUser
+  if (!mounted || authChecking || !currentUser) {
     return (
       <div style={{
         minHeight: '100vh',
@@ -424,7 +408,11 @@ export default function DashboardPage() {
           animation: 'spin 0.8s linear infinite'
         }} />
         <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Securing HR Portal session...</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+          {!currentUser && mounted && !authChecking
+            ? 'Redirecting to sign-in...'
+            : 'Securing HR Portal session...'}
+        </p>
       </div>
     );
   }
