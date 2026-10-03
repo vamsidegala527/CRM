@@ -271,23 +271,13 @@ def login_for_access_token(
             detail="Please complete your account setup. Check your email for the account setup instructions."
         )
 
-    # 4. Credential Verification: Check password before lockout enforcement
+    # 4. Credential Verification: Check password
     if not verify_password(user_credentials.password, user.hashed_password):
-        limiter.check_lockout(login_key)
-        limiter.record_failure(
-            login_key,
-            max_failures=settings.RATE_LIMIT_MAX_FAILURES,
-            lockout_seconds=settings.RATE_LIMIT_LOCKOUT_SECONDS,
-            window_seconds=settings.RATE_LIMIT_WINDOW_SECONDS
-        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
-    # 5. Authentication succeeded: immediately reset failure tracker for this email
-    limiter.record_success(login_key)
 
     # Track login count and first_login status
     current_count = user.login_count if user.login_count is not None else 0
@@ -391,9 +381,6 @@ def google_auth(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Please complete your account setup. Check your email for the account setup instructions."
         )
-
-    # Authentication succeeded: reset failure tracker for this email
-    limiter.record_success(google_key)
 
     # Clear any previous session revocation timestamp on successful Google sign-in
     user.token_revoked_at = None

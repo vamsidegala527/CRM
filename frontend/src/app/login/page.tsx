@@ -453,7 +453,7 @@ export default function LoginPage() {
           </div>
         )}
 
-        {/* Organization Access & Onboarding Guidance */}
+        {/* Organization Access & Onboarding Guidance
         {authMode === 'signin' && (
           <div style={{
             marginTop: '1.5rem',
@@ -471,7 +471,7 @@ export default function LoginPage() {
             </strong>
             Employees receive an account setup link via email. Administrators can sign in with their registered credentials.
           </div>
-        )}
+        )} */}
 
         {/* Toggle Back to Sign In */}
         {authMode === 'forgot' && resetStep === 'request' && (

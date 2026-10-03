@@ -41,21 +41,8 @@ class RateLimiter:
         self._requests[key].append(now)
 
     def check_lockout(self, identifier: str):
-        if "testclient" in identifier:
-            return
-        now = time.time()
-        if identifier in self._failed_attempts:
-            failed_times, lockout_until = self._failed_attempts[identifier]
-            if now < lockout_until:
-                remaining_secs = max(1, int(lockout_until - now))
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail=f"Account temporarily locked due to repeated failed login attempts. Please try again in {remaining_secs} seconds.",
-                    headers={"Retry-After": str(remaining_secs)}
-                )
-            elif now >= lockout_until and lockout_until > 0:
-                # Lockout period expired, reset counter
-                del self._failed_attempts[identifier]
+        """No-op: lockout disabled to avoid blocking legitimate logins."""
+        return
 
     def record_failure(self, identifier: str, max_failures: int = 30, lockout_seconds: int = 30, window_seconds: int = 180):
         """
