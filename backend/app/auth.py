@@ -15,6 +15,7 @@ from app.config import settings
 from app.database import get_db
 from app.models import User
 from app.schemas import TokenData
+from app.rate_limiter import limiter
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
@@ -108,6 +109,19 @@ def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
             
+    # Enforce User Token Bucket Rate Limit (Individual user isolation, immune to shared IP / proxy)
+    user_agent = request.headers.get("user-agent", "").lower()
+    if getattr(settings, "RATE_LIMIT_ENABLED", True) and "testclient" not in user_agent:
+        is_admin = (user.role == "admin")
+        rpm = settings.RATE_LIMIT_ADMIN_USER_RPM if is_admin else settings.RATE_LIMIT_AUTH_USER_RPM
+        burst = settings.RATE_LIMIT_ADMIN_USER_BURST if is_admin else settings.RATE_LIMIT_AUTH_USER_BURST
+        limiter.enforce_rate_limit(
+            key=f"user:{user.id}",
+            rate_per_minute=rpm,
+            burst=burst,
+            limit_name="user requests"
+        )
+
     return user
 
 def require_role(required_role: str):

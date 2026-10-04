@@ -17,7 +17,7 @@ import hashlib
 from app.database import get_db
 from app.models import User
 from app.schemas import (
-    UserCreate, UserResponse, Token, UserLogin, GoogleAuthRequest,
+    UserResponse, Token, UserLogin, GoogleAuthRequest,
     VerifyEmailRequest, ResendVerificationRequest, ForgotPasswordRequest, ResetPasswordRequest,
     EmployeeSetupRequest, ChangePasswordRequest
 )
@@ -86,6 +86,9 @@ def get_frontend_base_url(request: Request) -> str:
 @router.post("/verify-email", status_code=status.HTTP_200_OK)
 def verify_email(request: Request, payload: VerifyEmailRequest, db: Session = Depends(get_db)):
     """Verifies a user's email address using a valid 6-digit verification code or token."""
+    client_ip = get_client_ip(request)
+    limiter.enforce_strict_limit(f"verify_ip:{client_ip}", max_requests=15, window_seconds=900, action_name="verification")
+
     import urllib.parse
     raw_code = (payload.code or payload.token or "").strip()
     if not raw_code:
@@ -130,7 +133,13 @@ def resend_verification(
     db: Session = Depends(get_db)
 ):
     """Generates and resends a 6-digit email verification code to a registered user in background."""
+    client_ip = get_client_ip(request)
     email_clean = payload.email.strip().lower()
+
+    # Rate Limit: IP flood guard & email spam protection
+    limiter.enforce_strict_limit(f"resend_ip:{client_ip}", max_requests=10, window_seconds=900, action_name="resend verification")
+    limiter.enforce_strict_limit(f"resend_acc:{email_clean}", max_requests=3, window_seconds=900, action_name="resend verification")
+
     user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
     
     if not user:
@@ -170,7 +179,13 @@ def forgot_password(
     db: Session = Depends(get_db)
 ):
     """Generates a secure password reset token and dispatches reset email in background."""
+    client_ip = get_client_ip(request)
     email_clean = payload.email.strip().lower()
+
+    # Rate Limit: IP flood guard & email spam protection
+    limiter.enforce_strict_limit(f"forgot_ip:{client_ip}", max_requests=10, window_seconds=900, action_name="password reset")
+    limiter.enforce_strict_limit(f"forgot_acc:{email_clean}", max_requests=3, window_seconds=900, action_name="password reset")
+
     user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
 
     if not user:
@@ -205,8 +220,15 @@ def forgot_password(
 
 
 @router.post("/reset-password", status_code=status.HTTP_200_OK)
-def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
+def reset_password(
+    request: Request,
+    payload: ResetPasswordRequest,
+    db: Session = Depends(get_db)
+):
     """Resets user password using a valid reset token and terminates older active sessions."""
+    client_ip = get_client_ip(request)
+    limiter.enforce_strict_limit(f"reset_pwd_ip:{client_ip}", max_requests=10, window_seconds=900, action_name="password reset attempt")
+
     import urllib.parse
     clean_token = payload.token.strip()
     unquoted_token = urllib.parse.unquote(clean_token).strip()
@@ -245,39 +267,53 @@ def login_for_access_token(
     user_credentials: UserLogin,
     db: Session = Depends(get_db)
 ):
+    client_ip = get_client_ip(request)
     email_clean = user_credentials.email.strip().lower()
-    login_key = f"login:{email_clean}"
+
+    # 1. Rate Limit & Brute-force lockout check
+    limiter.check_login_lockout(email=email_clean, ip=client_ip)
+    limiter.enforce_rate_limit(f"login_ip:{client_ip}", rate_per_minute=60, burst=20, limit_name="sign-in")
 
     user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
     
-    # 1. Unrecognized User: entered email does not belong to any employee/admin account
+    # 2. Unrecognized User: entered email does not belong to any employee/admin account
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Your account was not found. Please contact company administrator to receive the account setup email."
         )
 
-    # 2. Deactivated / Inactive account check
+    # 3. Deactivated / Inactive account check
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Inactive account. Please contact system administrator."
         )
 
-    # 3. Setup Pending User: employee account exists but setup is still pending
+    # 4. Setup Pending User: employee account exists but setup is still pending
     if user.role == "employee" and not user.is_setup_complete:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Please complete your account setup. Check your email for the account setup instructions."
         )
 
-    # 4. Credential Verification: Check password
+    # 5. Credential Verification: Check password
     if not verify_password(user_credentials.password, user.hashed_password):
+        limiter.record_login_failure(
+            email=email_clean,
+            ip=client_ip,
+            max_failures=settings.RATE_LIMIT_MAX_FAILURES,
+            lockout_seconds=settings.RATE_LIMIT_LOCKOUT_SECONDS,
+            window_seconds=settings.RATE_LIMIT_WINDOW_SECONDS
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # 6. Authentication succeeded: reset failure tracker for this email + IP
+    limiter.record_login_success(email=email_clean, ip=client_ip)
 
     # Track login count and first_login status
     current_count = user.login_count if user.login_count is not None else 0
@@ -317,6 +353,9 @@ def google_auth(
     payload: GoogleAuthRequest,
     db: Session = Depends(get_db)
 ):
+    client_ip = get_client_ip(request)
+    limiter.enforce_rate_limit(f"google_ip:{client_ip}", rate_per_minute=60, burst=20, limit_name="Google sign-in")
+
     if not payload.id_token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -348,7 +387,6 @@ def google_auth(
         )
 
     email_clean = email.strip().lower()
-    google_key = f"google:{email_clean}"
 
     # Step 1: Check by google_id
     user = db.query(User).filter(User.google_id == google_user_id).first()
@@ -381,6 +419,9 @@ def google_auth(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Please complete your account setup. Check your email for the account setup instructions."
         )
+
+    # Authentication succeeded: reset failure tracker for this email + IP
+    limiter.record_login_success(email=email_clean, ip=client_ip)
 
     # Clear any previous session revocation timestamp on successful Google sign-in
     user.token_revoked_at = None
@@ -448,6 +489,9 @@ def setup_employee_account(
     - Validates link expiration and email match.
     - Sets password, sets is_setup_complete=True, and invalidates the token.
     """
+    client_ip = get_client_ip(request)
+    limiter.enforce_strict_limit(f"setup_ip:{client_ip}", max_requests=15, window_seconds=900, action_name="employee setup")
+
     token_raw = payload.token.strip()
     submitted_email = payload.email.strip().lower()
 
@@ -519,6 +563,8 @@ def change_password(
     Allows an authenticated user or employee to change their own password.
     Validates the current password and revokes any active sessions across devices.
     """
+    limiter.enforce_strict_limit(f"change_pwd_user:{current_user.id}", max_requests=5, window_seconds=900, action_name="password change")
+
     if not verify_password(payload.current_password, current_user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

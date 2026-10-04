@@ -79,13 +79,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# pyrefly: ignore [missing-import]
+from fastapi.responses import JSONResponse
+# pyrefly: ignore [missing-import]
+from fastapi.exceptions import HTTPException as FastAPIHTTPException
+from app.rate_limiter import limiter, get_client_ip
+
+@app.exception_handler(FastAPIHTTPException)
+async def http_exception_handler(request: Request, exc: FastAPIHTTPException):
+    headers = getattr(exc, "headers", None) or {}
+    if exc.status_code == 429:
+        retry_after = headers.get("Retry-After", "30")
+        return JSONResponse(
+            status_code=429,
+            content={
+                "detail": exc.detail,
+                "retry_after": int(retry_after) if retry_after.isdigit() else 30,
+                "status_code": 429
+            },
+            headers=headers
+        )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers=headers
+    )
+
 # Register API Routers
 app.include_router(auth.router)
 app.include_router(employees.router)
 app.include_router(company.router)
 
 @app.get("/")
-def read_root():
+def read_root(request: Request):
+    client_ip = get_client_ip(request)
+    limiter.enforce_rate_limit(f"root:{client_ip}", rate_per_minute=300, burst=50, limit_name="root requests")
     data = {
         "status": "online",
         "message": "HR & Employee Management Portal REST API is running",
@@ -97,5 +125,7 @@ def read_root():
     return data
 
 @app.get("/api/health")
-def health_check():
+def health_check(request: Request):
+    client_ip = get_client_ip(request)
+    limiter.enforce_rate_limit(f"health:{client_ip}", rate_per_minute=300, burst=50, limit_name="health check")
     return {"status": "ok"}

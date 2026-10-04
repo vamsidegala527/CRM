@@ -15,10 +15,18 @@ class Settings(BaseSettings):
     BREVO_SENDER_EMAIL: str = ""
     BREVO_SENDER_NAME: str = "HR & Employee Management Portal"
 
-    # Rate Limiter Configuration (Configurable via Environment Variables)
-    RATE_LIMIT_MAX_FAILURES: int = 30
+    # Rate Limiter & Security Configuration
+    REDIS_URL: str = ""
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_MAX_FAILURES: int = 15
     RATE_LIMIT_LOCKOUT_SECONDS: int = 30
     RATE_LIMIT_WINDOW_SECONDS: int = 180
+    RATE_LIMIT_PUBLIC_RPM: int = 120
+    RATE_LIMIT_PUBLIC_BURST: int = 40
+    RATE_LIMIT_AUTH_USER_RPM: int = 240
+    RATE_LIMIT_AUTH_USER_BURST: int = 60
+    RATE_LIMIT_ADMIN_USER_RPM: int = 480
+    RATE_LIMIT_ADMIN_USER_BURST: int = 100
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

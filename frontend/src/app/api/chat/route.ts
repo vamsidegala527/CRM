@@ -547,7 +547,7 @@ CONVERSATION & RESPONSE GUIDELINES:
         msg.includes('OTPM') ||
         msg.includes('Request too large')
       ) {
-        return 'Too many requests. Please wait a moment and try again.';
+        return 'The AI assistant is temporarily busy processing requests. Please try again in a few moments.';
       }
       if (msg.includes('Unauthorized') || msg.includes('token') || msg.includes('Not authenticated')) {
         return 'Session expired. Please sign in again.';

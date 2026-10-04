@@ -453,26 +453,6 @@ export default function LoginPage() {
           </div>
         )}
 
-        {/* Organization Access & Onboarding Guidance
-        {authMode === 'signin' && (
-          <div style={{
-            marginTop: '1.5rem',
-            padding: '0.85rem 1rem',
-            background: 'rgba(255, 255, 255, 0.03)',
-            border: '1px solid var(--border-color)',
-            borderRadius: 'var(--radius-sm)',
-            textAlign: 'center',
-            fontSize: '0.78rem',
-            color: 'var(--text-muted)',
-            lineHeight: 1.45
-          }}>
-            <strong style={{ color: 'var(--text-main)', display: 'block', marginBottom: '0.2rem' }}>
-              🏢 Organization Access
-            </strong>
-            Employees receive an account setup link via email. Administrators can sign in with their registered credentials.
-          </div>
-        )} */}
-
         {/* Toggle Back to Sign In */}
         {authMode === 'forgot' && resetStep === 'request' && (
           <div style={{
