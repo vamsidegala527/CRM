@@ -126,12 +126,11 @@ export async function POST(req: Request) {
     let modelInstance: any;
     if (groqKey) {
       const groq = createGroq({ apiKey: groqKey });
-      // openai/gpt-oss-120b has high OTPM limits on Groq; customizable via GROQ_MODEL
-      const groqModelName = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+      const groqModelName = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
       modelInstance = groq(groqModelName);
     } else {
       const google = createGoogleGenerativeAI({ apiKey: geminiKey });
-      modelInstance = google('gemini-3.6-flash');
+      modelInstance = google('gemini-1.5-flash');
     }
 
     const backendBase = (
@@ -148,6 +147,7 @@ export async function POST(req: Request) {
           headers: {
             'Content-Type': 'application/json',
             'Authorization': authHeader,
+            'x-internal-service': 'ai-assistant',
             ...(options.headers as Record<string, string> || {}),
           },
         });

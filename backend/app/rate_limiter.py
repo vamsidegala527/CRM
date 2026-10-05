@@ -108,10 +108,10 @@ class RateLimiter:
 
     def _maybe_prune(self, now: float):
         """Periodically removes stale buckets to prevent unbounded memory growth."""
-        if now - self._last_prune < 300:  # Prune every 5 minutes
+        if len(self._buckets) < 10000 and (now - self._last_prune < 180):
             return
         self._last_prune = now
-        stale_cutoff = now - 600
+        stale_cutoff = now - 300
 
         # Prune inactive token buckets
         stale_bucket_keys = [k for k, b in self._buckets.items() if b.last_update < stale_cutoff]
@@ -282,6 +282,8 @@ class RateLimiter:
                         detail=f"Too many sign-in attempts from your network. Please wait {remaining} seconds before trying again.",
                         headers={"Retry-After": str(remaining)}
                     )
+                elif ip_lockout_until > 0 and now >= ip_lockout_until:
+                    del self._failed_logins[ip_key]
 
     def record_login_failure(
         self,

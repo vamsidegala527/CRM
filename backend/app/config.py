@@ -18,15 +18,15 @@ class Settings(BaseSettings):
     # Rate Limiter & Security Configuration
     REDIS_URL: str = ""
     RATE_LIMIT_ENABLED: bool = True
-    RATE_LIMIT_MAX_FAILURES: int = 15
+    RATE_LIMIT_MAX_FAILURES: int = 20
     RATE_LIMIT_LOCKOUT_SECONDS: int = 30
     RATE_LIMIT_WINDOW_SECONDS: int = 180
-    RATE_LIMIT_PUBLIC_RPM: int = 120
-    RATE_LIMIT_PUBLIC_BURST: int = 40
-    RATE_LIMIT_AUTH_USER_RPM: int = 240
-    RATE_LIMIT_AUTH_USER_BURST: int = 60
-    RATE_LIMIT_ADMIN_USER_RPM: int = 480
-    RATE_LIMIT_ADMIN_USER_BURST: int = 100
+    RATE_LIMIT_PUBLIC_RPM: int = 300
+    RATE_LIMIT_PUBLIC_BURST: int = 100
+    RATE_LIMIT_AUTH_USER_RPM: int = 600
+    RATE_LIMIT_AUTH_USER_BURST: int = 150
+    RATE_LIMIT_ADMIN_USER_RPM: int = 1200
+    RATE_LIMIT_ADMIN_USER_BURST: int = 300
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

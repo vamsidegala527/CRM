@@ -111,7 +111,10 @@ def get_current_user(
             
     # Enforce User Token Bucket Rate Limit (Individual user isolation, immune to shared IP / proxy)
     user_agent = request.headers.get("user-agent", "").lower()
-    if getattr(settings, "RATE_LIMIT_ENABLED", True) and "testclient" not in user_agent:
+    is_internal = request.headers.get("x-internal-service") == "ai-assistant"
+    already_checked = getattr(request.state, "user_rate_limit_checked", False)
+    if getattr(settings, "RATE_LIMIT_ENABLED", True) and "testclient" not in user_agent and not is_internal and not already_checked:
+        request.state.user_rate_limit_checked = True
         is_admin = (user.role == "admin")
         rpm = settings.RATE_LIMIT_ADMIN_USER_RPM if is_admin else settings.RATE_LIMIT_AUTH_USER_RPM
         burst = settings.RATE_LIMIT_ADMIN_USER_BURST if is_admin else settings.RATE_LIMIT_AUTH_USER_BURST

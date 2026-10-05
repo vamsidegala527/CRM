@@ -36,11 +36,20 @@ export default function DashboardPage() {
   // Employee Directory Data & Filter State (Admin)
   const [employees, setEmployees] = useState<User[]>([]);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [accountStatusFilter, setAccountStatusFilter] = useState<AccountStatusFilter>('All');
   const [setupStatusFilter, setSetupStatusFilter] = useState<SetupStatusFilter>('All');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(15);
   const [isEmployeeLoading, setIsEmployeeLoading] = useState(false);
+
+  // Debounce search input to prevent rapid-fire requests on every keystroke
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [search]);
 
   // Global KPI Metrics (Direct DB count, immune to filters/search/pagination)
   const [employeeMetrics, setEmployeeMetrics] = useState<EmployeeMetrics>({
@@ -176,7 +185,7 @@ export default function DashboardPage() {
     setIsEmployeeLoading(true);
     try {
       const emps = await api.getEmployees({
-        search: search.trim() || undefined,
+        search: debouncedSearch.trim() || undefined,
         account_status: accountStatusFilter !== 'All' ? accountStatusFilter : undefined,
         setup_status: setupStatusFilter !== 'All' ? setupStatusFilter : undefined,
         skip: (page - 1) * limit,
@@ -188,11 +197,11 @@ export default function DashboardPage() {
     } finally {
       setIsEmployeeLoading(false);
     }
-  }, [search, accountStatusFilter, setupStatusFilter, page, limit]);
+  }, [debouncedSearch, accountStatusFilter, setupStatusFilter, page, limit]);
 
   // Computed pagination totals
   const totalEmployeesCount = useMemo(() => {
-    if (search.trim()) {
+    if (debouncedSearch.trim()) {
       return employees.length < limit && page === 1
         ? employees.length
         : Math.max(employees.length, employeeMetrics.total_employees);
@@ -208,7 +217,7 @@ export default function DashboardPage() {
     if (setupStatusFilter === 'Pending') return employeeMetrics.setup_pending;
     if (setupStatusFilter === 'Completed') return employeeMetrics.setup_completed;
     return employeeMetrics.total_employees;
-  }, [accountStatusFilter, setupStatusFilter, employeeMetrics, search, employees.length, limit, page]);
+  }, [accountStatusFilter, setupStatusFilter, employeeMetrics, debouncedSearch, employees.length, limit, page]);
 
   const totalPages = Math.max(1, Math.ceil((totalEmployeesCount || 1) / limit));
 

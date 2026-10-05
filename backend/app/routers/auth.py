@@ -87,7 +87,7 @@ def get_frontend_base_url(request: Request) -> str:
 def verify_email(request: Request, payload: VerifyEmailRequest, db: Session = Depends(get_db)):
     """Verifies a user's email address using a valid 6-digit verification code or token."""
     client_ip = get_client_ip(request)
-    limiter.enforce_strict_limit(f"verify_ip:{client_ip}", max_requests=15, window_seconds=900, action_name="verification")
+    limiter.enforce_strict_limit(f"verify_ip:{client_ip}", max_requests=30, window_seconds=180, action_name="verification")
 
     import urllib.parse
     raw_code = (payload.code or payload.token or "").strip()
@@ -136,9 +136,9 @@ def resend_verification(
     client_ip = get_client_ip(request)
     email_clean = payload.email.strip().lower()
 
-    # Rate Limit: IP flood guard & email spam protection
-    limiter.enforce_strict_limit(f"resend_ip:{client_ip}", max_requests=10, window_seconds=900, action_name="resend verification")
-    limiter.enforce_strict_limit(f"resend_acc:{email_clean}", max_requests=3, window_seconds=900, action_name="resend verification")
+    # Rate Limit: IP flood guard & email spam protection (3-min sliding window)
+    limiter.enforce_strict_limit(f"resend_ip:{client_ip}", max_requests=20, window_seconds=180, action_name="resend verification")
+    limiter.enforce_strict_limit(f"resend_acc:{email_clean}", max_requests=5, window_seconds=180, action_name="resend verification")
 
     user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
     
@@ -182,9 +182,9 @@ def forgot_password(
     client_ip = get_client_ip(request)
     email_clean = payload.email.strip().lower()
 
-    # Rate Limit: IP flood guard & email spam protection
-    limiter.enforce_strict_limit(f"forgot_ip:{client_ip}", max_requests=10, window_seconds=900, action_name="password reset")
-    limiter.enforce_strict_limit(f"forgot_acc:{email_clean}", max_requests=3, window_seconds=900, action_name="password reset")
+    # Rate Limit: IP flood guard & email spam protection (3-min sliding window)
+    limiter.enforce_strict_limit(f"forgot_ip:{client_ip}", max_requests=20, window_seconds=180, action_name="password reset")
+    limiter.enforce_strict_limit(f"forgot_acc:{email_clean}", max_requests=5, window_seconds=180, action_name="password reset")
 
     user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
 
@@ -227,7 +227,7 @@ def reset_password(
 ):
     """Resets user password using a valid reset token and terminates older active sessions."""
     client_ip = get_client_ip(request)
-    limiter.enforce_strict_limit(f"reset_pwd_ip:{client_ip}", max_requests=10, window_seconds=900, action_name="password reset attempt")
+    limiter.enforce_strict_limit(f"reset_pwd_ip:{client_ip}", max_requests=20, window_seconds=180, action_name="password reset attempt")
 
     import urllib.parse
     clean_token = payload.token.strip()
@@ -270,9 +270,9 @@ def login_for_access_token(
     client_ip = get_client_ip(request)
     email_clean = user_credentials.email.strip().lower()
 
-    # 1. Rate Limit & Brute-force lockout check
+    # 1. Rate Limit & Brute-force lockout check (120 RPM, burst 40)
     limiter.check_login_lockout(email=email_clean, ip=client_ip)
-    limiter.enforce_rate_limit(f"login_ip:{client_ip}", rate_per_minute=60, burst=20, limit_name="sign-in")
+    limiter.enforce_rate_limit(f"login_ip:{client_ip}", rate_per_minute=120, burst=40, limit_name="sign-in")
 
     user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
     
@@ -490,7 +490,7 @@ def setup_employee_account(
     - Sets password, sets is_setup_complete=True, and invalidates the token.
     """
     client_ip = get_client_ip(request)
-    limiter.enforce_strict_limit(f"setup_ip:{client_ip}", max_requests=15, window_seconds=900, action_name="employee setup")
+    limiter.enforce_strict_limit(f"setup_ip:{client_ip}", max_requests=30, window_seconds=180, action_name="employee setup")
 
     token_raw = payload.token.strip()
     submitted_email = payload.email.strip().lower()
@@ -563,7 +563,7 @@ def change_password(
     Allows an authenticated user or employee to change their own password.
     Validates the current password and revokes any active sessions across devices.
     """
-    limiter.enforce_strict_limit(f"change_pwd_user:{current_user.id}", max_requests=5, window_seconds=900, action_name="password change")
+    limiter.enforce_strict_limit(f"change_pwd_user:{current_user.id}", max_requests=15, window_seconds=180, action_name="password change")
 
     if not verify_password(payload.current_password, current_user.hashed_password):
         raise HTTPException(
