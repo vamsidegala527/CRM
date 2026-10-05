@@ -88,7 +88,7 @@ def send_verification_email(to_email: str, user_name: str, code: str, frontend_u
 
     text_body = f"""Hello {user_name},
 
-Thank you for registering with HR & Employee Management Portal.
+Welcome to HR & Employee Management Portal.
 
 Your 6-digit verification code is:
 {code}
@@ -96,7 +96,7 @@ Your 6-digit verification code is:
 You can also verify automatically using this link:
 {verify_url}
 
-This code will expire in 24 hours. If you did not create an account, you can safely ignore this message.
+This code will expire in 24 hours. If you did not request this verification, you can safely ignore this message.
 """
 
     html_body = f"""<!DOCTYPE html>
@@ -120,7 +120,7 @@ This code will expire in 24 hours. If you did not create an account, you can saf
     <div class="brand">HR & Employee Management Portal</div>
     <h1>Verify Your Email Address</h1>
     <p>Hi <strong>{user_name}</strong>,</p>
-    <p>Please enter the following 6-digit verification code to complete your registration:</p>
+    <p>Please enter the following 6-digit verification code to verify your account:</p>
     
     <div class="code-box">
       <div class="code">{code}</div>
