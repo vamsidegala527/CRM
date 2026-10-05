@@ -96,6 +96,14 @@ class UserBase(BaseModel):
     def clean_full_name(cls, v: str) -> str:
         return validate_name_string(v)
 
+class UserCreate(UserBase):
+    password: str = Field(..., min_length=8, max_length=72)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        return validate_strong_password(v)
+
 class UserLogin(BaseModel):
     email: EmailStr
     password: str

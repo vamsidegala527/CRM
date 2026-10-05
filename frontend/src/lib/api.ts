@@ -206,6 +206,13 @@ export const api = {
     return res;
   },
 
+  async register(userData: { email: string; password: string; full_name: string }): Promise<any> {
+    return request<any>('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(userData),
+    });
+  },
+
   async googleAuth(idToken: string): Promise<AuthResponse> {
     const res = await request<AuthResponse>('/api/auth/google', {
       method: 'POST',
