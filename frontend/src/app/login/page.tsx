@@ -7,7 +7,6 @@ import { api } from '../../lib/api';
 import { formatUserFriendlyError } from '../../lib/errorUtils';
 import PasswordInput from '../../components/PasswordInput';
 import { validateEmail, EMAIL_ERROR_MESSAGE } from '../../lib/validators/emailValidator';
-import { isPasswordValid, PASSWORD_ERROR_MESSAGE } from '../../lib/validation';
 
 declare global {
   interface Window {
@@ -21,6 +20,7 @@ export default function LoginPage() {
   // If already authenticated via HttpOnly cookie, redirect directly to dashboard
   useEffect(() => {
     if (typeof window !== 'undefined') {
+      // Redirect email verification tokens or codes to dedicated verification page
       const urlParams = new URLSearchParams(window.location.search);
       const verifyToken = urlParams.get('verify_token') || urlParams.get('code');
       if (verifyToken) {
@@ -28,6 +28,7 @@ export default function LoginPage() {
         return;
       }
 
+      // Redirect password reset tokens to dedicated reset password page
       const resetTokenParam = urlParams.get('reset_token') || urlParams.get('token');
       const emailParam = urlParams.get('email');
       if (resetTokenParam) {
@@ -45,31 +46,18 @@ export default function LoginPage() {
     }
   }, [router]);
 
-  const [authMode, setAuthMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
-
-  const [fullName, setFullName] = useState('');
-  const [fullNameTouched, setFullNameTouched] = useState(false);
+  const [authMode, setAuthMode] = useState<'signin' | 'forgot'>('signin');
 
   const [email, setEmail] = useState('');
   const [emailTouched, setEmailTouched] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
-
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
 
   // Password reset step (request link or link sent confirmation)
   const [resetStep, setResetStep] = useState<'request' | 'sent'>('request');
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
-
-  const [gisLoaded, setGisLoaded] = useState(false);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   const handleEmailBlur = () => {
     setEmailTouched(true);
@@ -88,6 +76,14 @@ export default function LoginPage() {
       setEmailError(res.isValid ? null : EMAIL_ERROR_MESSAGE);
     }
   };
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  const [gisLoaded, setGisLoaded] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const handleGoogleCallback = useCallback(async (response: any) => {
     try {
@@ -110,6 +106,7 @@ export default function LoginPage() {
   const renderGoogleButton = useCallback(() => {
     const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '64576092611-tlgd7s6jcubbtmk94ho741tjebvjdtbo.apps.googleusercontent.com';
     if (!googleClientId) {
+      console.warn('[Google GIS] NEXT_PUBLIC_GOOGLE_CLIENT_ID is not configured.');
       return;
     }
 
@@ -131,7 +128,7 @@ export default function LoginPage() {
         });
       }
     }
-  }, [handleGoogleCallback]);
+  }, [authMode, handleGoogleCallback]);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && window.google?.accounts?.id) {
@@ -140,7 +137,7 @@ export default function LoginPage() {
   }, []);
 
   useEffect(() => {
-    if (mounted && gisLoaded && authMode === 'signin') {
+    if (mounted && gisLoaded && authMode !== 'forgot') {
       renderGoogleButton();
     }
   }, [mounted, gisLoaded, authMode, renderGoogleButton]);
@@ -157,50 +154,19 @@ export default function LoginPage() {
       return;
     }
 
-    if (authMode === 'signup') {
-      if (!fullName.trim() || fullName.trim().length < 2) {
-        setFullNameTouched(true);
-        setError('Please enter your full name (at least 2 characters).');
-        return;
-      }
-      if (!isPasswordValid(password)) {
-        setError(PASSWORD_ERROR_MESSAGE);
-        return;
-      }
-      if (password !== confirmPassword) {
-        setError('Passwords do not match. Please confirm your password.');
-        return;
-      }
-    }
-
     setLoading(true);
 
     try {
       if (authMode === 'signin') {
         await api.login({ email: emailRes.sanitizedEmail, password });
         router.push('/');
-      } else if (authMode === 'signup') {
-        const res = await api.register({
-          email: emailRes.sanitizedEmail,
-          password,
-          full_name: fullName.trim()
-        });
-        setSuccessMsg(res.message || 'Account created successfully! Please sign in with your new credentials.');
-        setAuthMode('signin');
-        setPassword('');
-        setConfirmPassword('');
       } else if (authMode === 'forgot') {
         const res = await api.forgotPassword(emailRes.sanitizedEmail);
         setSuccessMsg(res.message || 'Password reset link sent! Please check your email.');
         setResetStep('sent');
       }
     } catch (err: any) {
-      const defaultFallback = authMode === 'signup'
-        ? 'Account creation failed. Please check your information and try again.'
-        : authMode === 'forgot'
-          ? 'Password reset request failed. Please try again.'
-          : 'Incorrect email or password.';
-      setError(formatUserFriendlyError(err, defaultFallback));
+      setError(formatUserFriendlyError(err, 'Incorrect email or password.'));
     } finally {
       setLoading(false);
     }
@@ -255,7 +221,7 @@ export default function LoginPage() {
         boxShadow: 'var(--shadow-lg)'
       }}>
         {/* Header */}
-        <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
           <div style={{
             width: '56px',
             height: '56px',
@@ -273,70 +239,16 @@ export default function LoginPage() {
             HR
           </div>
           <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--text-main)', margin: '0 0 0.5rem' }}>
-            {authMode === 'forgot'
-              ? 'Reset Password'
-              : authMode === 'signup'
-                ? 'Create Account'
-                : 'Sign In'}
+            {authMode === 'forgot' ? 'Reset Password' : 'Sign In'}
           </h2>
           <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
             {authMode === 'forgot'
               ? (resetStep === 'request'
                 ? 'Enter your registered email to receive a password-reset link'
                 : 'Check your inbox for the reset link')
-              : authMode === 'signup'
-                ? 'Register for the HR & Employee Management Portal'
-                : 'Sign in to your organization account'}
+              : 'Sign in to your organization account'}
           </p>
         </div>
-
-        {/* Tab Navigation (Sign In vs Create Account) */}
-        {authMode !== 'forgot' && (
-          <div style={{
-            display: 'flex',
-            background: 'rgba(255, 255, 255, 0.05)',
-            padding: '4px',
-            borderRadius: 'var(--radius-md)',
-            marginBottom: '1.5rem'
-          }}>
-            <button
-              type="button"
-              onClick={() => { setAuthMode('signin'); setError(null); setSuccessMsg(null); }}
-              style={{
-                flex: 1,
-                padding: '0.6rem 0.5rem',
-                border: 'none',
-                borderRadius: 'calc(var(--radius-md) - 2px)',
-                fontSize: '0.875rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                background: authMode === 'signin' ? 'var(--primary, #6366F1)' : 'transparent',
-                color: authMode === 'signin' ? '#FFFFFF' : 'var(--text-muted)',
-                transition: 'all 0.2s ease',
-              }}
-            >
-              Sign In
-            </button>
-            <button
-              type="button"
-              onClick={() => { setAuthMode('signup'); setError(null); setSuccessMsg(null); }}
-              style={{
-                flex: 1,
-                padding: '0.6rem 0.5rem',
-                border: 'none',
-                borderRadius: 'calc(var(--radius-md) - 2px)',
-                fontSize: '0.875rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                background: authMode === 'signup' ? 'var(--primary, #6366F1)' : 'transparent',
-                color: authMode === 'signup' ? '#FFFFFF' : 'var(--text-muted)',
-                transition: 'all 0.2s ease',
-              }}
-            >
-              Sign Up
-            </button>
-          </div>
-        )}
 
         {/* Success Alert */}
         {successMsg && (
@@ -428,44 +340,47 @@ export default function LoginPage() {
         ) : (
           /* Form */
           <form onSubmit={handleSubmit}>
-            {authMode === 'signup' && (
+            {authMode === 'signin' && (
               <div className="form-group">
-                <label className="form-label">Full Name</label>
+                <label className="form-label">Email Address</label>
                 <input
-                  type="text"
+                  type="email"
                   className="form-control"
-                  placeholder="e.g. Alex Morgan"
-                  value={fullName}
-                  onChange={(e) => {
-                    setFullName(e.target.value);
-                    if (fullNameTouched && e.target.value.trim().length >= 2) {
-                      setError(null);
-                    }
-                  }}
-                  onBlur={() => setFullNameTouched(true)}
+                  placeholder="name@company.com"
+                  value={email}
+                  onChange={(e) => handleEmailChange(e.target.value)}
+                  onBlur={handleEmailBlur}
+                  style={emailError ? { borderColor: 'var(--accent-rose, #F43F5E)' } : undefined}
                   required
                 />
+                {emailError && (
+                  <span style={{ display: 'block', fontSize: '0.78rem', color: '#F43F5E', marginTop: '0.35rem' }}>
+                    {emailError}
+                  </span>
+                )}
               </div>
             )}
 
-            <div className="form-group">
-              <label className="form-label">Email Address</label>
-              <input
-                type="email"
-                className="form-control"
-                placeholder="name@company.com"
-                value={email}
-                onChange={(e) => handleEmailChange(e.target.value)}
-                onBlur={handleEmailBlur}
-                style={emailError ? { borderColor: 'var(--accent-rose, #F43F5E)' } : undefined}
-                required
-              />
-              {emailError && (
-                <span style={{ display: 'block', fontSize: '0.78rem', color: '#F43F5E', marginTop: '0.35rem' }}>
-                  {emailError}
-                </span>
-              )}
-            </div>
+            {authMode === 'forgot' && resetStep === 'request' && (
+              <div className="form-group">
+                <label className="form-label">Email Address</label>
+                <input
+                  type="email"
+                  className="form-control"
+                  placeholder="Enter your account email"
+                  value={email}
+                  onChange={(e) => handleEmailChange(e.target.value)}
+                  onBlur={handleEmailBlur}
+                  style={emailError ? { borderColor: 'var(--accent-rose, #F43F5E)' } : undefined}
+                  required
+                />
+                {emailError && (
+                  <span style={{ display: 'block', fontSize: '0.78rem', color: '#F43F5E', marginTop: '0.35rem' }}>
+                    {emailError}
+                  </span>
+                )}
+              </div>
+            )}
 
             {authMode === 'signin' && (
               <div className="form-group">
@@ -500,29 +415,6 @@ export default function LoginPage() {
               </div>
             )}
 
-            {authMode === 'signup' && (
-              <>
-                <div className="form-group">
-                  <label className="form-label">Password</label>
-                  <PasswordInput
-                    placeholder="At least 8 characters"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Confirm Password</label>
-                  <PasswordInput
-                    placeholder="Repeat password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    required
-                  />
-                </div>
-              </>
-            )}
-
             <button
               type="submit"
               disabled={loading}
@@ -533,15 +425,13 @@ export default function LoginPage() {
                 ? 'Processing...'
                 : authMode === 'forgot'
                   ? 'Send Password Reset Link'
-                  : authMode === 'signup'
-                    ? 'Create Account'
-                    : 'Sign In'}
+                  : 'Sign In'}
             </button>
           </form>
         )}
 
         {/* OR Separator & Google Sign-In Container (Only for Sign-In) */}
-        {authMode === 'signin' && (
+        {authMode !== 'forgot' && (
           <div style={{ marginTop: '1.25rem' }}>
             <div style={{
               display: 'flex',

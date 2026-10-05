@@ -89,6 +89,24 @@ class SlidingWindowTracker:
         return True, remaining, reset_secs
 
 
+def is_private_or_loopback_ip(ip: Optional[str]) -> bool:
+    """Returns True if the IP is loopback, local dev, Docker network, or internal private RFC1918 subnet."""
+    if not ip:
+        return True
+    ip_clean = ip.strip().lower()
+    if ip_clean in ("127.0.0.1", "::1", "localhost", "testclient", "unknown", "0.0.0.0"):
+        return True
+    if ip_clean.startswith("10.") or ip_clean.startswith("192.168."):
+        return True
+    if ip_clean.startswith("172."):
+        parts = ip_clean.split(".")
+        if len(parts) >= 2 and parts[1].isdigit():
+            second_octet = int(parts[1])
+            if 16 <= second_octet <= 31:
+                return True
+    return False
+
+
 class RateLimiter:
     """
     Comprehensive, enterprise-grade Rate Limiter supporting:
@@ -134,16 +152,10 @@ class RateLimiter:
         for k in stale_login_keys:
             del self._failed_logins[k]
 
-    def _is_exempt(self, key: str) -> bool:
-        if not getattr(settings, "RATE_LIMIT_ENABLED", True):
-            return True
-        k = key.lower()
-        return any(exempt in k for exempt in ("testclient", "127.0.0.1", "::1", "localhost", "internal", "health", "root"))
-
     def check_token_bucket(
         self,
         key: str,
-        rate_per_minute: int = 300,
+        rate_per_minute: int = 120,
         burst: Optional[int] = None,
         cost: int = 1
     ) -> Tuple[bool, int, int]:
@@ -151,11 +163,20 @@ class RateLimiter:
         Evaluates a Token Bucket limit.
         Returns (allowed, remaining_tokens, reset_or_retry_seconds).
         """
-        if self._is_exempt(key):
-            return True, rate_per_minute, 1
+        if not getattr(settings, "RATE_LIMIT_ENABLED", True) or "testclient" in key:
+            return True, rate_per_minute, 60
 
-        capacity = burst if burst is not None else max(rate_per_minute // 2, 50)
-        fill_rate = float(rate_per_minute) / 60.0
+        # For localhost / loopback / private IP requests, expand burst and capacity to prevent false-positive blocks
+        ip_candidate = key.split(":")[-1] if ":" in key else ""
+        if is_private_or_loopback_ip(ip_candidate):
+            effective_rpm = max(rate_per_minute, 1200)
+            effective_burst = max(burst or 0, 300)
+        else:
+            effective_rpm = rate_per_minute
+            effective_burst = burst if burst is not None else max(rate_per_minute // 2, 20)
+
+        capacity = effective_burst
+        fill_rate = float(effective_rpm) / 60.0
         now = time.time()
 
         with self._lock:
@@ -163,6 +184,7 @@ class RateLimiter:
             if key not in self._buckets:
                 self._buckets[key] = TokenBucket(capacity=capacity, fill_rate=fill_rate, now=now)
             bucket = self._buckets[key]
+            # If rate changed dynamically, update bucket params
             bucket.capacity = capacity
             bucket.fill_rate = fill_rate
             return bucket.consume(tokens_needed=cost, now=now)
@@ -177,7 +199,7 @@ class RateLimiter:
         Evaluates a Sliding Window limit for strict sensitive actions.
         Returns (allowed, remaining, reset_or_retry_seconds).
         """
-        if self._is_exempt(key):
+        if not getattr(settings, "RATE_LIMIT_ENABLED", True) or "testclient" in key:
             return True, max_requests, window_seconds
 
         now = time.time()
@@ -190,7 +212,7 @@ class RateLimiter:
     def enforce_rate_limit(
         self,
         key: str,
-        rate_per_minute: int = 300,
+        rate_per_minute: int = 120,
         burst: Optional[int] = None,
         cost: int = 1,
         limit_name: str = "requests"
@@ -250,22 +272,20 @@ class RateLimiter:
 
     # ==================== Account-Level Brute Force Defense ====================
 
-    def check_login_lockout(self, email: str, ip: str = "") -> None:
+    def check_login_lockout(self, email: str, ip: str) -> None:
         """
-        Checks if this specific account email is currently locked out due to repeated failed logins.
-        Protects against brute force without impacting other users sharing a proxy IP.
+        Checks if this specific account email or IP is currently locked out due to repeated failed logins.
         """
         if not getattr(settings, "RATE_LIMIT_ENABLED", True):
             return
 
         now = time.time()
         email_clean = email.strip().lower()
-        if not email_clean:
-            return
-
         account_key = f"login_acc:{hashlib.sha256(email_clean.encode()).hexdigest()[:16]}"
+        ip_key = f"login_ip:{ip}"
 
         with self._lock:
+            # 1. Check Account Lockout (Per-account brute force defense)
             if account_key in self._failed_logins:
                 _, lockout_until = self._failed_logins[account_key]
                 if now < lockout_until:
@@ -276,18 +296,32 @@ class RateLimiter:
                         headers={"Retry-After": str(remaining)}
                     )
                 elif lockout_until > 0 and now >= lockout_until:
+                    # Lockout expired, clear tracker
                     del self._failed_logins[account_key]
+
+            # 2. Check IP Flood Lockout (only for public non-loopback IPs so local/proxy users are never blocked)
+            if not is_private_or_loopback_ip(ip) and ip_key in self._failed_logins:
+                _, ip_lockout_until = self._failed_logins[ip_key]
+                if now < ip_lockout_until:
+                    remaining = max(1, int(math.ceil(ip_lockout_until - now)))
+                    raise HTTPException(
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        detail=f"Too many sign-in attempts from your network. Please wait {remaining} seconds before trying again.",
+                        headers={"Retry-After": str(remaining)}
+                    )
+                elif ip_lockout_until > 0 and now >= ip_lockout_until:
+                    del self._failed_logins[ip_key]
 
     def record_login_failure(
         self,
         email: str,
-        ip: str = "",
-        max_failures: int = 20,
+        ip: str,
+        max_failures: int = 15,
         lockout_seconds: int = 30,
         window_seconds: int = 180
     ) -> None:
         """
-        Records a failed authentication attempt for the target account.
+        Records a failed authentication attempt for both the target account and the IP.
         Only triggers a temporary lockout if max_failures is exceeded within window_seconds.
         """
         if not getattr(settings, "RATE_LIMIT_ENABLED", True):
@@ -295,13 +329,12 @@ class RateLimiter:
 
         now = time.time()
         email_clean = email.strip().lower()
-        if not email_clean:
-            return
-
         account_key = f"login_acc:{hashlib.sha256(email_clean.encode()).hexdigest()[:16]}"
+        ip_key = f"login_ip:{ip}"
         cutoff = now - window_seconds
 
         with self._lock:
+            # 1. Update Account Failure Log
             acc_failures, acc_lockout = self._failed_logins.get(account_key, ([], 0.0))
             recent_acc = [t for t in acc_failures if t > cutoff]
             recent_acc.append(now)
@@ -312,17 +345,30 @@ class RateLimiter:
             else:
                 self._failed_logins[account_key] = (recent_acc, 0.0)
 
-    def record_login_success(self, email: str, ip: str = "") -> None:
+            # 2. Update IP Failure Log (only for public non-loopback IPs)
+            if not is_private_or_loopback_ip(ip):
+                ip_max = max_failures * 3
+                ip_failures, ip_lockout = self._failed_logins.get(ip_key, ([], 0.0))
+                recent_ip = [t for t in ip_failures if t > cutoff]
+                recent_ip.append(now)
+
+                if len(recent_ip) >= ip_max:
+                    ip_lockout = now + lockout_seconds
+                    self._failed_logins[ip_key] = (recent_ip, ip_lockout)
+                else:
+                    self._failed_logins[ip_key] = (recent_ip, 0.0)
+
+    def record_login_success(self, email: str, ip: str) -> None:
         """
         Resets failed attempt counters immediately upon successful authentication.
         """
         email_clean = email.strip().lower()
-        if not email_clean:
-            return
         account_key = f"login_acc:{hashlib.sha256(email_clean.encode()).hexdigest()[:16]}"
+        ip_key = f"login_ip:{ip}"
 
         with self._lock:
             self._failed_logins.pop(account_key, None)
+            self._failed_logins.pop(ip_key, None)
 
 
 # Global singleton instance

@@ -17,7 +17,7 @@ import hashlib
 from app.database import get_db
 from app.models import User
 from app.schemas import (
-    UserResponse, Token, UserLogin, UserCreate, GoogleAuthRequest,
+    UserResponse, Token, UserLogin, GoogleAuthRequest,
     VerifyEmailRequest, ResendVerificationRequest, ForgotPasswordRequest, ResetPasswordRequest,
     EmployeeSetupRequest, ChangePasswordRequest
 )
@@ -81,69 +81,6 @@ def get_frontend_base_url(request: Request) -> str:
         if parsed.scheme and parsed.netloc:
             return f"{parsed.scheme}://{parsed.netloc}".rstrip('/')
     return settings.FRONTEND_URL.strip().rstrip('/')
-
-
-@router.post("/register", status_code=status.HTTP_201_CREATED)
-def register_user(
-    request: Request,
-    user: UserCreate,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
-):
-    """Creates a new administrator account and dispatches an email verification code."""
-    client_ip = get_client_ip(request)
-    limiter.enforce_rate_limit(
-        f"register_ip:{client_ip}",
-        rate_per_minute=settings.RATE_LIMIT_REGISTER_RPM,
-        burst=settings.RATE_LIMIT_REGISTER_BURST,
-        limit_name="registration"
-    )
-
-    email_clean = user.email.strip().lower()
-    existing_user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="An account with this email address already exists. Please sign in or reset your password."
-        )
-
-    verification_code = f"{secrets.randbelow(1000000):06d}"
-    verification_expires = datetime.utcnow() + timedelta(hours=24)
-
-    db_user = User(
-        email=email_clean,
-        full_name=user.full_name.strip(),
-        hashed_password=get_password_hash(user.password),
-        is_active=True,
-        is_verified=False,
-        first_login=True,
-        login_count=0,
-        verification_token=verification_code,
-        verification_token_expires=verification_expires,
-        role="admin",
-        is_setup_complete=True
-    )
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-
-    fe_url = get_frontend_base_url(request)
-    background_tasks.add_task(
-        safe_send_verification_email,
-        db_user.email,
-        db_user.full_name or "User",
-        verification_code,
-        fe_url
-    )
-
-    return {
-        "message": f"Account created successfully. Verification code sent to {db_user.email}.",
-        "id": db_user.id,
-        "email": db_user.email,
-        "full_name": db_user.full_name,
-        "user": UserResponse.model_validate(db_user),
-        "verification_token": verification_code if not IS_PROD else None
-    }
 
 
 @router.post("/verify-email", status_code=status.HTTP_200_OK)
@@ -333,12 +270,12 @@ def login_for_access_token(
     client_ip = get_client_ip(request)
     email_clean = user_credentials.email.strip().lower()
 
-    # 1. Rate Limit & Brute-force lockout check
+    # 1. Rate Limit & Brute-force lockout check (Configurable RPM and Burst)
     limiter.check_login_lockout(email=email_clean, ip=client_ip)
     limiter.enforce_rate_limit(
         f"login_ip:{client_ip}",
-        rate_per_minute=settings.RATE_LIMIT_SIGNIN_RPM,
-        burst=settings.RATE_LIMIT_SIGNIN_BURST,
+        rate_per_minute=getattr(settings, "RATE_LIMIT_SIGNIN_RPM", 600),
+        burst=getattr(settings, "RATE_LIMIT_SIGNIN_BURST", 200),
         limit_name="sign-in"
     )
 
@@ -424,8 +361,8 @@ def google_auth(
     client_ip = get_client_ip(request)
     limiter.enforce_rate_limit(
         f"google_ip:{client_ip}",
-        rate_per_minute=settings.RATE_LIMIT_SIGNIN_RPM,
-        burst=settings.RATE_LIMIT_SIGNIN_BURST,
+        rate_per_minute=getattr(settings, "RATE_LIMIT_SIGNIN_RPM", 600),
+        burst=getattr(settings, "RATE_LIMIT_SIGNIN_BURST", 200),
         limit_name="Google sign-in"
     )
 

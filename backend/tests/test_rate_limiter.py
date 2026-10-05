@@ -1,5 +1,4 @@
 import time
-import pytest
 from fastapi import HTTPException
 from app.rate_limiter import TokenBucket, SlidingWindowTracker, RateLimiter, get_client_ip
 
@@ -53,7 +52,7 @@ def test_sliding_window_tracker():
 
 
 def test_account_lockout_and_isolation():
-    """Test brute-force login lockout per account and verify other accounts are unaffected."""
+    """Test brute-force login lockout per account and verify loopback immunity & account isolation."""
     limiter = RateLimiter()
     email_a = "victim@company.com"
     email_b = "innocent@company.com"
@@ -68,10 +67,15 @@ def test_account_lockout_and_isolation():
         limiter.record_login_failure(email=email_a, ip=ip, max_failures=5, lockout_seconds=30, window_seconds=60)
 
     # 3. email_a should now be locked out with HTTP 429
-    with pytest.raises(HTTPException) as exc_info:
+    locked_out = False
+    try:
         limiter.check_login_lockout(email=email_a, ip=ip)
-    assert exc_info.value.status_code == 429
-    assert "temporarily locked" in exc_info.value.detail
+    except HTTPException as exc:
+        locked_out = True
+        assert exc.status_code == 429
+        assert "temporarily locked" in exc.detail
+
+    assert locked_out, "email_a should have been locked out after 5 failed attempts"
 
     # 4. email_b on the same network is NOT locked out (Account Isolation)
     limiter.check_login_lockout(email=email_b, ip=ip)
@@ -79,6 +83,13 @@ def test_account_lockout_and_isolation():
     # 5. Correct password entered on email_a resets failure state
     limiter.record_login_success(email=email_a, ip=ip)
     limiter.check_login_lockout(email=email_a, ip=ip)
+
+    # 6. Loopback IP (127.0.0.1) does not suffer IP-level lockout
+    loopback_ip = "127.0.0.1"
+    for _ in range(20):
+        limiter.record_login_failure(email="tester@company.com", ip=loopback_ip, max_failures=5, lockout_seconds=30, window_seconds=60)
+    # Another user on localhost is NOT locked out by IP
+    limiter.check_login_lockout(email="other@company.com", ip=loopback_ip)
 
 
 def test_client_ip_extraction():

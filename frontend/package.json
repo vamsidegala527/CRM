@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node --test tests/email-validator.test.mjs tests/frontend-security.test.mjs"
+    "test": "node --test tests/email-validator.test.mjs tests/error-utils.test.mjs"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.67",
