@@ -224,6 +224,7 @@ class RateLimiter:
             key=key, rate_per_minute=rate_per_minute, burst=burst, cost=cost
         )
         if not allowed:
+            print(f"🚫 [RATE LIMIT TRIGGERED] Key: {key} | Rate: {rate_per_minute}/min | Burst: {burst} | Reset in: {reset_or_retry}s")
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=f"Too many {limit_name}. Please retry after {reset_or_retry} seconds.",
@@ -254,6 +255,7 @@ class RateLimiter:
             key=key, max_requests=max_requests, window_seconds=window_seconds
         )
         if not allowed:
+            print(f"🚫 [STRICT LIMIT TRIGGERED] Key: {key} | Max: {max_requests}/{window_seconds}s | Action: {action_name} | Reset in: {reset_or_retry}s")
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=f"Too many {action_name} attempts. Please wait {reset_or_retry} seconds before trying again.",
@@ -290,6 +292,7 @@ class RateLimiter:
                 _, lockout_until = self._failed_logins[account_key]
                 if now < lockout_until:
                     remaining = max(1, int(math.ceil(lockout_until - now)))
+                    print(f"🚫 [LOGIN LOCKOUT ACTIVE] Account: {email_clean} | Remaining: {remaining}s")
                     raise HTTPException(
                         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                         detail=f"Account temporarily locked due to repeated failed sign-in attempts. Please try again in {remaining} seconds.",
@@ -303,7 +306,7 @@ class RateLimiter:
         self,
         email: str,
         ip: Optional[str] = None,
-        max_failures: int = 15,
+        max_failures: int = 25,
         lockout_seconds: int = 30,
         window_seconds: int = 180
     ) -> None:
@@ -327,8 +330,10 @@ class RateLimiter:
             if len(recent_acc) >= max_failures:
                 acc_lockout = now + lockout_seconds
                 self._failed_logins[account_key] = (recent_acc, acc_lockout)
+                print(f"⚠️ [LOGIN LOCKOUT TRIGGERED] Account: {email_clean} reached {len(recent_acc)} failures. Locked for {lockout_seconds}s.")
             else:
                 self._failed_logins[account_key] = (recent_acc, 0.0)
+                print(f"ℹ️ [LOGIN FAILURE RECORDED] Account: {email_clean} ({len(recent_acc)}/{max_failures} failures in window).")
 
     def record_login_success(self, email: str, ip: Optional[str] = None) -> None:
         """
@@ -339,7 +344,9 @@ class RateLimiter:
         account_key = f"login_acc:{hashlib.sha256(email_clean.encode()).hexdigest()[:16]}"
 
         with self._lock:
-            self._failed_logins.pop(account_key, None)
+            if account_key in self._failed_logins:
+                print(f"✅ [LOGIN SUCCESS] Reset failure tracker for account: {email_clean}")
+                del self._failed_logins[account_key]
 
 
 # Global singleton instance

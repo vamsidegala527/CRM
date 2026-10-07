@@ -106,9 +106,7 @@ app.include_router(employees.router)
 app.include_router(company.router)
 
 @app.get("/")
-def read_root(request: Request):
-    client_ip = get_client_ip(request)
-    limiter.enforce_rate_limit(f"root:{client_ip}", rate_per_minute=300, burst=50, limit_name="root requests")
+def read_root():
     data = {
         "status": "online",
         "message": "HR & Employee Management Portal REST API is running",
@@ -120,7 +118,5 @@ def read_root(request: Request):
     return data
 
 @app.get("/api/health")
-def health_check(request: Request):
-    client_ip = get_client_ip(request)
-    limiter.enforce_rate_limit(f"health:{client_ip}", rate_per_minute=300, burst=50, limit_name="health check")
+def health_check():
     return {"status": "ok"}

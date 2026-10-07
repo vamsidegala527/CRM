@@ -32,18 +32,18 @@ class Settings(BaseSettings):
     REDIS_URL: str = ""
     RATE_LIMIT_ENABLED: bool = True
 
-    # Account Brute-Force Defense (3-minute window, 20 max failures, 30s cooldown)
-    RATE_LIMIT_MAX_FAILURES: int = 20
+    # Account Brute-Force Defense (3-minute window, 25 max failures, 30s cooldown)
+    RATE_LIMIT_MAX_FAILURES: int = 25
     RATE_LIMIT_LOCKOUT_SECONDS: int = 30
     RATE_LIMIT_WINDOW_SECONDS: int = 180
 
     # User Token Buckets (Isolated per User ID)
-    RATE_LIMIT_PUBLIC_RPM: int = 300
-    RATE_LIMIT_PUBLIC_BURST: int = 100
-    RATE_LIMIT_AUTH_USER_RPM: int = 600
-    RATE_LIMIT_AUTH_USER_BURST: int = 150
-    RATE_LIMIT_ADMIN_USER_RPM: int = 1200
-    RATE_LIMIT_ADMIN_USER_BURST: int = 300
+    RATE_LIMIT_PUBLIC_RPM: int = 600
+    RATE_LIMIT_PUBLIC_BURST: int = 200
+    RATE_LIMIT_AUTH_USER_RPM: int = 1200
+    RATE_LIMIT_AUTH_USER_BURST: int = 300
+    RATE_LIMIT_ADMIN_USER_RPM: int = 2400
+    RATE_LIMIT_ADMIN_USER_BURST: int = 600
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -265,34 +265,37 @@ def login_for_access_token(
 ):
     email_clean = user_credentials.email.strip().lower()
 
-    # 1. Check Account Lockout (Strictly isolated per account, unaffected by other users/IPs)
-    limiter.check_login_lockout(email=email_clean)
-
     user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
     
-    # 2. Unrecognized User: entered email does not belong to any employee/admin account
+    # 1. Unrecognized User: entered email does not belong to any employee/admin account
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Your account was not found. Please contact company administrator to receive the account setup email."
         )
 
-    # 3. Deactivated / Inactive account check
+    # 2. Deactivated / Inactive account check
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Inactive account. Please contact system administrator."
         )
 
-    # 4. Setup Pending User: employee account exists but setup is still pending
+    # 3. Setup Pending User: employee account exists but setup is still pending
     if user.role == "employee" and not user.is_setup_complete:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Please complete your account setup. Check your email for the account setup instructions."
         )
 
-    # 5. Credential Verification: Check password
-    if not verify_password(user_credentials.password, user.hashed_password):
+    # 4. Credential Verification: Check password
+    is_valid_pwd = verify_password(user_credentials.password, user.hashed_password)
+
+    if not is_valid_pwd:
+        # Check if account is in a temporary lockout cooldown
+        limiter.check_login_lockout(email=email_clean)
+
+        # Record failed attempt strictly for this account
         limiter.record_login_failure(
             email=email_clean,
             max_failures=settings.RATE_LIMIT_MAX_FAILURES,
@@ -305,7 +308,7 @@ def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # 6. Authentication succeeded: immediately reset failure tracker for this account
+    # 5. Authentication succeeded: immediately reset failure tracker for this account
     limiter.record_login_success(email=email_clean)
 
     # Track login count and first_login status
