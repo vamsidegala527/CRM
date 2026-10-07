@@ -46,11 +46,7 @@ def safe_send_password_reset_email(to_email: str, user_name: str, token: str, fr
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
-IS_PROD = (
-    os.getenv("ENVIRONMENT", "").lower() in ("production", "prod") or
-    os.getenv("RENDER", "").lower() == "true" or
-    os.getenv("COOKIE_SECURE", "false").lower() == "true"
-)
+IS_PROD = settings.is_production
 
 def set_auth_cookie(response: Response, token: str):
     """Sets an HttpOnly, SameSite=Lax cookie containing the JWT access token."""

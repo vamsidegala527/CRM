@@ -13,11 +13,7 @@ try:
 except Exception as e:
     print(f"PostgreSQL Table Creation Warning: {e}")
 
-IS_PROD = (
-    os.getenv("ENVIRONMENT", "").lower() in ("production", "prod") or
-    os.getenv("RENDER", "").lower() == "true" or
-    os.getenv("DISABLE_DOCS", "false").lower() == "true"
-)
+IS_PROD = settings.is_production or settings.DISABLE_DOCS
 
 app = FastAPI(
     title="HR & Employee Management Portal REST API",
@@ -52,9 +48,8 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 # 2. Strict CORS Configuration
-allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
-if allowed_origins_env:
-    allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
+if settings.ALLOWED_ORIGINS:
+    allowed_origins = [origin.strip() for origin in settings.ALLOWED_ORIGINS.split(",") if origin.strip()]
 else:
     allowed_origins = [
         "http://localhost:3000",
