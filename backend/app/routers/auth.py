@@ -267,17 +267,10 @@ def login_for_access_token(
     user_credentials: UserLogin,
     db: Session = Depends(get_db)
 ):
-    client_ip = get_client_ip(request)
     email_clean = user_credentials.email.strip().lower()
 
-    # 1. Rate Limit & Brute-force lockout check (Configurable RPM and Burst)
-    limiter.check_login_lockout(email=email_clean, ip=client_ip)
-    limiter.enforce_rate_limit(
-        f"login_ip:{client_ip}",
-        rate_per_minute=getattr(settings, "RATE_LIMIT_SIGNIN_RPM", 600),
-        burst=getattr(settings, "RATE_LIMIT_SIGNIN_BURST", 200),
-        limit_name="sign-in"
-    )
+    # 1. Check Account Lockout (Strictly isolated per account, unaffected by other users/IPs)
+    limiter.check_login_lockout(email=email_clean)
 
     user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
     
@@ -306,7 +299,6 @@ def login_for_access_token(
     if not verify_password(user_credentials.password, user.hashed_password):
         limiter.record_login_failure(
             email=email_clean,
-            ip=client_ip,
             max_failures=settings.RATE_LIMIT_MAX_FAILURES,
             lockout_seconds=settings.RATE_LIMIT_LOCKOUT_SECONDS,
             window_seconds=settings.RATE_LIMIT_WINDOW_SECONDS
@@ -317,8 +309,8 @@ def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # 6. Authentication succeeded: reset failure tracker for this email + IP
-    limiter.record_login_success(email=email_clean, ip=client_ip)
+    # 6. Authentication succeeded: immediately reset failure tracker for this account
+    limiter.record_login_success(email=email_clean)
 
     # Track login count and first_login status
     current_count = user.login_count if user.login_count is not None else 0
@@ -358,14 +350,6 @@ def google_auth(
     payload: GoogleAuthRequest,
     db: Session = Depends(get_db)
 ):
-    client_ip = get_client_ip(request)
-    limiter.enforce_rate_limit(
-        f"google_ip:{client_ip}",
-        rate_per_minute=getattr(settings, "RATE_LIMIT_SIGNIN_RPM", 600),
-        burst=getattr(settings, "RATE_LIMIT_SIGNIN_BURST", 200),
-        limit_name="Google sign-in"
-    )
-
     if not payload.id_token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -430,8 +414,8 @@ def google_auth(
             detail="Please complete your account setup. Check your email for the account setup instructions."
         )
 
-    # Authentication succeeded: reset failure tracker for this email + IP
-    limiter.record_login_success(email=email_clean, ip=client_ip)
+    # Authentication succeeded: reset failure tracker for this email
+    limiter.record_login_success(email=email_clean)
 
     # Clear any previous session revocation timestamp on successful Google sign-in
     user.token_revoked_at = None
