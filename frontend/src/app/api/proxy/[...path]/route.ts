@@ -26,11 +26,13 @@ async function handler(request: NextRequest, { params }: { params: { path: strin
   }
 
   // Ensure real client IP is forwarded so backend rate limiter identifies the real user
-  const clientIp = request.headers.get('x-real-ip') ||
+  const clientIp = request.headers.get('x-app-client-ip') ||
+                   request.headers.get('x-real-ip') ||
                    (request.headers.get('x-forwarded-for') ? request.headers.get('x-forwarded-for')!.split(',')[0].trim() : '') ||
                    request.headers.get('cf-connecting-ip') ||
                    (request as any).ip;
   if (clientIp) {
+    headers.set('x-app-client-ip', clientIp);
     headers.set('x-real-ip', clientIp);
     if (!headers.get('x-forwarded-for')) {
       headers.set('x-forwarded-for', clientIp);

@@ -25,7 +25,7 @@ if getattr(settings, "REDIS_URL", None) and settings.REDIS_URL.strip():
 
 class TokenBucket:
     """
-    High-performance, thread-safe Token Bucket rate limiter.
+    High-performance, thread-safe Token Bucket rate limiter using monotonic clock.
     Allows bursts up to `capacity` while enforcing an average rate of `fill_rate` tokens/second.
     """
     __slots__ = ('capacity', 'fill_rate', 'tokens', 'last_update')
@@ -34,15 +34,15 @@ class TokenBucket:
         self.capacity = float(capacity)
         self.fill_rate = float(fill_rate)
         self.tokens = float(capacity)
-        self.last_update = now if now is not None else time.time()
+        self.last_update = now if now is not None else time.monotonic()
 
     def consume(self, tokens_needed: float = 1.0, now: Optional[float] = None) -> Tuple[bool, int, int]:
         """
         Attempts to consume `tokens_needed` tokens.
         Returns (allowed: bool, remaining_tokens: int, reset_seconds: int).
         """
-        current_time = now if now is not None else time.time()
-        elapsed = current_time - self.last_update
+        current_time = now if now is not None else time.monotonic()
+        elapsed = max(0.0, current_time - self.last_update)
         self.last_update = current_time
 
         # Replenish tokens based on elapsed time
@@ -61,7 +61,7 @@ class TokenBucket:
 
 class SlidingWindowTracker:
     """
-    Sliding window log tracker for security-sensitive actions (e.g. OTP resend, forgot-password).
+    Sliding window log tracker for security-sensitive actions using monotonic clock.
     """
     __slots__ = ('window_seconds', 'timestamps')
 
@@ -70,7 +70,7 @@ class SlidingWindowTracker:
         self.timestamps: deque = deque()
 
     def check_and_add(self, max_requests: int, now: Optional[float] = None) -> Tuple[bool, int, int]:
-        current_time = now if now is not None else time.time()
+        current_time = now if now is not None else time.monotonic()
         cutoff = current_time - self.window_seconds
 
         # Prune expired timestamps
@@ -122,7 +122,7 @@ class RateLimiter:
         self._sliding_windows: Dict[str, SlidingWindowTracker] = {}
         # Maps account_key -> (list_of_failure_timestamps, lockout_until_timestamp)
         self._failed_logins: Dict[str, Tuple[List[float], float]] = {}
-        self._last_prune = time.time()
+        self._last_prune = time.monotonic()
 
     def _maybe_prune(self, now: float):
         """Periodically removes stale buckets to prevent unbounded memory growth."""
@@ -169,15 +169,15 @@ class RateLimiter:
         # For localhost / loopback / private IP requests, expand burst and capacity to prevent false-positive blocks
         ip_candidate = key.split(":")[-1] if ":" in key else ""
         if is_private_or_loopback_ip(ip_candidate):
-            effective_rpm = max(rate_per_minute, 1200)
-            effective_burst = max(burst or 0, 300)
+            effective_rpm = max(rate_per_minute, 2400)
+            effective_burst = max(burst or 0, 600)
         else:
             effective_rpm = rate_per_minute
-            effective_burst = burst if burst is not None else max(rate_per_minute // 2, 20)
+            effective_burst = burst if burst is not None else max(rate_per_minute // 2, 50)
 
         capacity = effective_burst
         fill_rate = float(effective_rpm) / 60.0
-        now = time.time()
+        now = time.monotonic()
 
         with self._lock:
             self._maybe_prune(now)
@@ -202,7 +202,7 @@ class RateLimiter:
         if not getattr(settings, "RATE_LIMIT_ENABLED", True) or "testclient" in key:
             return True, max_requests, window_seconds
 
-        now = time.time()
+        now = time.monotonic()
         with self._lock:
             self._maybe_prune(now)
             if key not in self._sliding_windows or self._sliding_windows[key].window_seconds != window_seconds:
@@ -282,7 +282,7 @@ class RateLimiter:
         if not getattr(settings, "RATE_LIMIT_ENABLED", True):
             return
 
-        now = time.time()
+        now = time.monotonic()
         email_clean = email.strip().lower()
         account_key = f"login_acc:{hashlib.sha256(email_clean.encode()).hexdigest()[:16]}"
 
@@ -317,7 +317,7 @@ class RateLimiter:
         if not getattr(settings, "RATE_LIMIT_ENABLED", True):
             return
 
-        now = time.time()
+        now = time.monotonic()
         email_clean = email.strip().lower()
         account_key = f"login_acc:{hashlib.sha256(email_clean.encode()).hexdigest()[:16]}"
         cutoff = now - window_seconds
@@ -355,29 +355,23 @@ limiter = RateLimiter()
 
 def get_client_ip(request: Request) -> str:
     """
-    Extracts the true client IP address with full support for:
-    - Cloudflare (CF-Connecting-IP)
-    - Akamai / Enterprise (True-Client-IP)
-    - Nginx / Next.js Proxy (X-Real-IP)
-    - Multi-hop proxies (X-Forwarded-For)
-    - Direct connection fallback (request.client.host)
+    Extracts the true client IP address with full support for reverse proxies and CDNs.
+    Priority order:
+    1. X-App-Client-IP (explicitly forwarded by our Next.js proxy from browser connection)
+    2. X-Forwarded-For (leftmost public IP representing original browser)
+    3. X-Real-IP
+    4. CF-Connecting-IP
+    5. True-Client-IP
+    6. Direct request.client.host
     """
-    # 1. Cloudflare edge
-    cf_ip = request.headers.get("CF-Connecting-IP") or request.headers.get("cf-connecting-ip")
-    if cf_ip and cf_ip.strip():
-        return cf_ip.strip()
+    # 1. Custom app client IP header (set by our Next.js /api/proxy)
+    app_ip = request.headers.get("X-App-Client-IP") or request.headers.get("x-app-client-ip")
+    if app_ip and app_ip.strip():
+        candidate = app_ip.strip()
+        if candidate.lower() != "unknown":
+            return candidate
 
-    # 2. True-Client-IP
-    true_ip = request.headers.get("True-Client-IP") or request.headers.get("true-client-ip")
-    if true_ip and true_ip.strip():
-        return true_ip.strip()
-
-    # 3. Standard X-Real-IP
-    real_ip = request.headers.get("X-Real-IP") or request.headers.get("x-real-ip")
-    if real_ip and real_ip.strip():
-        return real_ip.strip()
-
-    # 4. Standard X-Forwarded-For (Leftmost public IP)
+    # 2. Leftmost public IP from X-Forwarded-For (client -> proxy1 -> proxy2)
     forwarded_for = request.headers.get("X-Forwarded-For") or request.headers.get("x-forwarded-for")
     if forwarded_for:
         ips = [ip.strip() for ip in forwarded_for.split(",") if ip.strip()]
@@ -385,7 +379,22 @@ def get_client_ip(request: Request) -> str:
             if candidate and candidate.lower() != "unknown":
                 return candidate
 
-    # 5. Direct client host fallback
+    # 3. Standard X-Real-IP
+    real_ip = request.headers.get("X-Real-IP") or request.headers.get("x-real-ip")
+    if real_ip and real_ip.strip() and real_ip.strip().lower() != "unknown":
+        return real_ip.strip()
+
+    # 4. Cloudflare edge
+    cf_ip = request.headers.get("CF-Connecting-IP") or request.headers.get("cf-connecting-ip")
+    if cf_ip and cf_ip.strip() and cf_ip.strip().lower() != "unknown":
+        return cf_ip.strip()
+
+    # 5. True-Client-IP
+    true_ip = request.headers.get("True-Client-IP") or request.headers.get("true-client-ip")
+    if true_ip and true_ip.strip() and true_ip.strip().lower() != "unknown":
+        return true_ip.strip()
+
+    # 6. Direct client host fallback
     if request.client and request.client.host:
         return request.client.host
 
