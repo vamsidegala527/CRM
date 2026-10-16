@@ -36,13 +36,22 @@ export default function LoginPage() {
         return;
       }
 
-      api.getCurrentUser()
-        .then(() => {
-          router.replace('/');
-        })
-        .catch(() => {
-          // Token is invalid/expired; remain on login page
-        });
+      // Only check auto-login if user info is stored and no recent auth failure
+      const stored = typeof window !== 'undefined' ? sessionStorage.getItem('auth_failed') : null;
+      if (!stored) {
+        api.getCurrentUser()
+          .then((user) => {
+            if (user) {
+              router.replace('/');
+            }
+          })
+          .catch(() => {
+            // Token is invalid/expired; mark session so we don't loop
+            if (typeof window !== 'undefined') {
+              sessionStorage.setItem('auth_failed', 'true');
+            }
+          });
+      }
     }
   }, [router]);
 
@@ -158,6 +167,9 @@ export default function LoginPage() {
 
     try {
       if (authMode === 'signin') {
+        if (typeof window !== 'undefined') {
+          sessionStorage.removeItem('auth_failed');
+        }
         await api.login({ email: emailRes.sanitizedEmail, password });
         router.push('/');
       } else if (authMode === 'forgot') {

@@ -132,7 +132,7 @@ export default function DashboardPage() {
     return () => clearInterval(timer);
   }, [authChecking]);
 
-  // Auth Guard with Immediate Redirect Support
+  // Auth Guard with Clean SPA Navigation
   const checkAuth = useCallback(async () => {
     setAuthError(null);
     setAuthChecking(true);
@@ -140,9 +140,7 @@ export default function DashboardPage() {
       const user = await api.getCurrentUser();
       if (!user) {
         setAuthChecking(false);
-        if (typeof window !== 'undefined') {
-          window.location.href = '/login';
-        }
+        router.replace('/login');
         return;
       }
       setCurrentUser(user);
@@ -150,11 +148,9 @@ export default function DashboardPage() {
       setAuthChecking(false);
     } catch (err: any) {
       setAuthChecking(false);
-      if (typeof window !== 'undefined') {
-        window.location.href = '/login';
-      }
+      router.replace('/login');
     }
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (!mounted) return;

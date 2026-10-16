@@ -108,9 +108,11 @@ async function request<T>(
       });
       clearTimeout(timeoutId);
 
-      // If backend is waking up (502 Bad Gateway or 504 Gateway Timeout), retry safe requests
-      if ([502, 503, 504].includes(response.status) && attempt <= maxRetries) {
-        await wait(1500 * attempt);
+      // If backend is waking up (502/503/504) or transient edge 429 on safe idempotent requests, auto-retry with backoff
+      if ([429, 502, 503, 504].includes(response.status) && attempt <= maxRetries) {
+        const retryAfterHdr = response.headers.get('retry-after');
+        const retrySecs = retryAfterHdr && !isNaN(Number(retryAfterHdr)) ? Number(retryAfterHdr) : (1.5 * attempt);
+        await wait(Math.min(retrySecs * 1000, 3000));
         continue;
       }
 

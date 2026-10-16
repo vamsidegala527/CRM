@@ -85,24 +85,35 @@ def test_account_lockout_and_isolation():
 
 
 def test_client_ip_extraction():
-    """Test accurate client IP resolution from various proxy headers."""
+    """Test accurate client IP resolution from various proxy headers with X-App-Client-IP & XFF priority."""
     class FakeRequest:
         def __init__(self, headers=None, client_host="127.0.0.1"):
             self.headers = headers or {}
             self.client = type("Client", (), {"host": client_host})()
 
-    # Cloudflare edge header prioritized
-    req_cf = FakeRequest(headers={"CF-Connecting-IP": "198.51.100.22", "X-Forwarded-For": "10.0.0.1"})
-    assert get_client_ip(req_cf) == "198.51.100.22"
+    # 1. Custom app client IP header prioritized over proxy edge headers
+    req_app = FakeRequest(headers={
+        "X-App-Client-IP": "203.0.113.10",
+        "CF-Connecting-IP": "198.51.100.22",
+        "X-Forwarded-For": "10.0.0.1"
+    })
+    assert get_client_ip(req_app) == "203.0.113.10"
 
-    # X-Real-IP
+    # 2. X-Forwarded-For leftmost public IP prioritized over edge CF header
+    req_xff = FakeRequest(headers={
+        "CF-Connecting-IP": "198.51.100.22",
+        "X-Forwarded-For": "203.0.113.55, 10.0.0.2, 198.51.100.22"
+    })
+    assert get_client_ip(req_xff) == "203.0.113.55"
+
+    # 3. X-Real-IP
     req_real = FakeRequest(headers={"X-Real-IP": "198.51.100.33"})
     assert get_client_ip(req_real) == "198.51.100.33"
 
-    # X-Forwarded-For multi-hop
-    req_xff = FakeRequest(headers={"X-Forwarded-For": "198.51.100.44, 10.0.0.2, 127.0.0.1"})
-    assert get_client_ip(req_xff) == "198.51.100.44"
+    # 4. Cloudflare edge when direct
+    req_cf = FakeRequest(headers={"CF-Connecting-IP": "198.51.100.22"})
+    assert get_client_ip(req_cf) == "198.51.100.22"
 
-    # Direct client fallback
+    # 5. Direct client fallback
     req_direct = FakeRequest(client_host="192.0.2.1")
     assert get_client_ip(req_direct) == "192.0.2.1"
