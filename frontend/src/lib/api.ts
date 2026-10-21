@@ -108,13 +108,22 @@ async function request<T>(
       });
       clearTimeout(timeoutId);
 
-      // If backend is waking up (502/503/504) or transient edge 429 on safe idempotent requests, auto-retry with backoff
-      if ([429, 502, 503, 504].includes(response.status) && attempt <= maxRetries) {
-        const retryAfterHdr = response.headers.get('retry-after');
-        const retrySecs = retryAfterHdr && !isNaN(Number(retryAfterHdr)) ? Number(retryAfterHdr) : (1.5 * attempt);
-        await wait(Math.min(retrySecs * 1000, 3000));
+      // If backend is waking up (502/503/504), auto-retry with backoff
+      if ([502, 503, 504].includes(response.status) && attempt <= maxRetries) {
+        await wait(1500 * attempt);
         continue;
       }
+
+      // Safe idempotent GET requests on transient 429 only if server Retry-After is brief (<= 3s)
+      if (response.status === 429 && isSafeMethod && attempt <= maxRetries) {
+        const retryAfterHdr = response.headers.get('retry-after');
+        const retrySecs = retryAfterHdr && !isNaN(Number(retryAfterHdr)) ? Number(retryAfterHdr) : 0;
+        if (retrySecs > 0 && retrySecs <= 3) {
+          await wait(retrySecs * 1000);
+          continue;
+        }
+      }
+
 
       if (!response.ok) {
         let extractedDetail: string | null = null;

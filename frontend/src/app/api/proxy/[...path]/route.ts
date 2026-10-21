@@ -20,16 +20,21 @@ async function handler(request: NextRequest, { params }: { params: { path: strin
     }
   });
 
+  // Strip untrusted client-supplied proxy secret to prevent header forgery
+  headers.delete('x-internal-proxy-secret');
+  if (process.env.INTERNAL_PROXY_SECRET) {
+    headers.set('x-internal-proxy-secret', process.env.INTERNAL_PROXY_SECRET);
+  }
+
   // Ensure origin is explicitly provided so backend generates accurate email links
   if (!headers.get('origin')) {
     headers.set('origin', url.origin);
   }
 
-  // Ensure real client IP is forwarded so backend rate limiter identifies the real user
-  const clientIp = request.headers.get('x-app-client-ip') ||
+  // Resolve genuine client IP from trusted edge headers (excluding client-controlled x-app-client-ip)
+  const clientIp = request.headers.get('cf-connecting-ip') ||
                    request.headers.get('x-real-ip') ||
                    (request.headers.get('x-forwarded-for') ? request.headers.get('x-forwarded-for')!.split(',')[0].trim() : '') ||
-                   request.headers.get('cf-connecting-ip') ||
                    (request as any).ip;
   if (clientIp) {
     headers.set('x-app-client-ip', clientIp);
@@ -38,6 +43,7 @@ async function handler(request: NextRequest, { params }: { params: { path: strin
       headers.set('x-forwarded-for', clientIp);
     }
   }
+
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 60000);

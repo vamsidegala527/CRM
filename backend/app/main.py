@@ -119,4 +119,9 @@ def read_root():
 
 @app.get("/api/health")
 def health_check():
-    return {"status": "ok"}
+    from app.rate_limiter import metrics
+    return {
+        "status": "ok",
+        "rate_limiter": metrics.snapshot()
+    }
+

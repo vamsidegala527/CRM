@@ -28,11 +28,17 @@ class Settings(BaseSettings):
     BREVO_SENDER_EMAIL: str = ""
     BREVO_SENDER_NAME: str = "HR & Employee Management Portal"
 
-    # ==================== 4. Rate Limiting & Account Defense ====================
+    # ==================== 4. Rate Limiting & Proxy Security ====================
     REDIS_URL: str = ""
     RATE_LIMIT_ENABLED: bool = True
+    INTERNAL_PROXY_SECRET: str = ""
+    TRUSTED_PROXIES: str = "127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
 
-    # Account Brute-Force Defense (3-minute window, 25 max failures, 30s cooldown)
+    # Login Abuse & Password Spraying Protection
+    RATE_LIMIT_LOGIN_IP_MAX_REQUESTS: int = 30
+    RATE_LIMIT_LOGIN_IP_WINDOW_SECONDS: int = 60
+
+    # Account Brute-Force Defense (Progressive Backoff)
     RATE_LIMIT_MAX_FAILURES: int = 25
     RATE_LIMIT_LOCKOUT_SECONDS: int = 30
     RATE_LIMIT_WINDOW_SECONDS: int = 180
@@ -44,6 +50,9 @@ class Settings(BaseSettings):
     RATE_LIMIT_AUTH_USER_BURST: int = 300
     RATE_LIMIT_ADMIN_USER_RPM: int = 2400
     RATE_LIMIT_ADMIN_USER_BURST: int = 600
+
+    # Fail-Closed vs Fail-Open Policies
+    RATE_LIMIT_FAIL_CLOSED_AUTH: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -58,14 +67,34 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_security(self):
-        """Warns if sensitive defaults are retained in production."""
+        """Warns if sensitive defaults are retained in production and validates rate limit parameters."""
         if self.is_production and "antigravity_secret_key" in self.SECRET_KEY:
             warnings.warn(
                 "⚠️ [SECURITY WARNING] Using default SECRET_KEY in production! "
                 "Please set a unique SECRET_KEY in your production environment variables.",
                 RuntimeWarning,
             )
+
+        # Rate Limit Parameter Validation (prevent negative, zero, or malformed limits)
+        positive_fields = [
+            ("RATE_LIMIT_LOGIN_IP_MAX_REQUESTS", self.RATE_LIMIT_LOGIN_IP_MAX_REQUESTS),
+            ("RATE_LIMIT_LOGIN_IP_WINDOW_SECONDS", self.RATE_LIMIT_LOGIN_IP_WINDOW_SECONDS),
+            ("RATE_LIMIT_MAX_FAILURES", self.RATE_LIMIT_MAX_FAILURES),
+            ("RATE_LIMIT_LOCKOUT_SECONDS", self.RATE_LIMIT_LOCKOUT_SECONDS),
+            ("RATE_LIMIT_WINDOW_SECONDS", self.RATE_LIMIT_WINDOW_SECONDS),
+            ("RATE_LIMIT_PUBLIC_RPM", self.RATE_LIMIT_PUBLIC_RPM),
+            ("RATE_LIMIT_PUBLIC_BURST", self.RATE_LIMIT_PUBLIC_BURST),
+            ("RATE_LIMIT_AUTH_USER_RPM", self.RATE_LIMIT_AUTH_USER_RPM),
+            ("RATE_LIMIT_AUTH_USER_BURST", self.RATE_LIMIT_AUTH_USER_BURST),
+            ("RATE_LIMIT_ADMIN_USER_RPM", self.RATE_LIMIT_ADMIN_USER_RPM),
+            ("RATE_LIMIT_ADMIN_USER_BURST", self.RATE_LIMIT_ADMIN_USER_BURST),
+        ]
+        for name, val in positive_fields:
+            if val is None or val <= 0:
+                raise ValueError(f"Configuration error: '{name}' must be a strictly positive integer, got: {val}")
+
         return self
 
 
 settings = Settings()
+

@@ -36,6 +36,10 @@ services:
         sync: false
       - key: BREVO_SENDER_NAME
         value: HR & Employee Management Portal
+      - key: REDIS_URL
+        sync: false
+      - key: INTERNAL_PROXY_SECRET
+        sync: false
 
   # Frontend Next.js Web Service
   - type: web
@@ -56,12 +60,15 @@ services:
           type: web
           name: hr-backend
           property: url
+      - key: INTERNAL_PROXY_SECRET
+        sync: false
       - key: NEXT_PUBLIC_GOOGLE_CLIENT_ID
         value: 64576092611-tlgd7s6jcubbtmk94ho741tjebvjdtbo.apps.googleusercontent.com
       - key: GEMINI_API_KEY
         sync: false
       - key: GROQ_API_KEY
         sync: false
+
 
 databases:
   - name: hr-postgres-db

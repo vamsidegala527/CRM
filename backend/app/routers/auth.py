@@ -27,7 +27,7 @@ from app.auth import (
     get_current_user, oauth2_scheme, verify_employee_setup_token
 )
 from app.config import settings
-from app.rate_limiter import limiter, get_client_ip
+from app.rate_limiter import limiter, get_client_ip, rate_limit_login_ip, hash_identity
 from app.email_service import send_verification_email, send_password_reset_email, EmailDeliveryError
 
 def safe_send_verification_email(to_email: str, user_name: str, code: str, frontend_url: str = None) -> None:
@@ -131,10 +131,11 @@ def resend_verification(
     """Generates and resends a 6-digit email verification code to a registered user in background."""
     client_ip = get_client_ip(request)
     email_clean = payload.email.strip().lower()
+    acc_hash = hash_identity(email_clean)
 
     # Rate Limit: IP flood guard & email spam protection (3-min sliding window)
-    limiter.enforce_strict_limit(f"resend_ip:{client_ip}", max_requests=20, window_seconds=180, action_name="resend verification")
-    limiter.enforce_strict_limit(f"resend_acc:{email_clean}", max_requests=5, window_seconds=180, action_name="resend verification")
+    limiter.enforce_strict_limit(f"resend_ip:{client_ip}", max_requests=20, window_seconds=180, action_name="resend verification", policy_name="resend_ip")
+    limiter.enforce_strict_limit(f"resend_acc:{acc_hash}", max_requests=5, window_seconds=180, action_name="resend verification", policy_name="resend_account")
 
     user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
     
@@ -177,10 +178,11 @@ def forgot_password(
     """Generates a secure password reset token and dispatches reset email in background."""
     client_ip = get_client_ip(request)
     email_clean = payload.email.strip().lower()
+    acc_hash = hash_identity(email_clean)
 
     # Rate Limit: IP flood guard & email spam protection (3-min sliding window)
-    limiter.enforce_strict_limit(f"forgot_ip:{client_ip}", max_requests=20, window_seconds=180, action_name="password reset")
-    limiter.enforce_strict_limit(f"forgot_acc:{email_clean}", max_requests=5, window_seconds=180, action_name="password reset")
+    limiter.enforce_strict_limit(f"forgot_ip:{client_ip}", max_requests=20, window_seconds=180, action_name="password reset", policy_name="forgot_ip")
+    limiter.enforce_strict_limit(f"forgot_acc:{acc_hash}", max_requests=5, window_seconds=180, action_name="password reset", policy_name="forgot_account")
 
     user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
 
@@ -256,7 +258,7 @@ def reset_password(
     return {"message": "Password has been successfully updated. Please log in with your new password."}
 
 
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=Token, dependencies=[Depends(rate_limit_login_ip())])
 def login_for_access_token(
     request: Request,
     response: Response,
@@ -265,36 +267,42 @@ def login_for_access_token(
 ):
     email_clean = user_credentials.email.strip().lower()
 
+    # 1. Progressive account lockout check executed BEFORE expensive bcrypt verification
+    limiter.check_login_lockout(email=email_clean)
+
     user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
     
-    # 1. Unrecognized User: entered email does not belong to any employee/admin account
+    # 2. Unrecognized User: entered email does not belong to any employee/admin account
     if not user:
+        limiter.record_login_failure(
+            email=email_clean,
+            max_failures=settings.RATE_LIMIT_MAX_FAILURES,
+            lockout_seconds=settings.RATE_LIMIT_LOCKOUT_SECONDS,
+            window_seconds=settings.RATE_LIMIT_WINDOW_SECONDS
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Your account was not found. Please contact company administrator to receive the account setup email."
         )
 
-    # 2. Deactivated / Inactive account check
+    # 3. Deactivated / Inactive account check
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Inactive account. Please contact system administrator."
         )
 
-    # 3. Setup Pending User: employee account exists but setup is still pending
+    # 4. Setup Pending User: employee account exists but setup is still pending
     if user.role == "employee" and not user.is_setup_complete:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Please complete your account setup. Check your email for the account setup instructions."
         )
 
-    # 4. Credential Verification: Check password
+    # 5. Credential Verification: Check password
     is_valid_pwd = verify_password(user_credentials.password, user.hashed_password)
 
     if not is_valid_pwd:
-        # Check if account is in a temporary lockout cooldown
-        limiter.check_login_lockout(email=email_clean)
-
         # Record failed attempt strictly for this account
         limiter.record_login_failure(
             email=email_clean,
@@ -308,7 +316,7 @@ def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # 5. Authentication succeeded: immediately reset failure tracker for this account
+    # 6. Authentication succeeded: immediately reset failure tracker for this account
     limiter.record_login_success(email=email_clean)
 
     # Track login count and first_login status

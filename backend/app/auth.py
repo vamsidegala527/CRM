@@ -109,7 +109,9 @@ def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
             
+    request.state.user = user
     return user
+
 
 def require_role(required_role: str):
     """Dependency that enforces role-based access control (RBAC)."""
