@@ -148,3 +148,13 @@ def test_login_progressive_account_lockout_and_recovery():
     )
     assert res_innocent.status_code == 200, "Innocent account must not be locked out"
     assert "access_token" in res_innocent.json()
+
+    # Valid password entered by legitimate user succeeds immediately and clears failure tracker
+    res_valid = client.post(
+        "/api/auth/login",
+        json={"email": test_email, "password": "CorrectPassword123!"},
+        headers={"X-App-Client-IP": "203.0.113.100"}
+    )
+    assert res_valid.status_code == 200, "Legitimate user with valid password must always be able to log in"
+    assert "access_token" in res_valid.json()
+

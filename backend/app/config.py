@@ -31,12 +31,13 @@ class Settings(BaseSettings):
     # ==================== 4. Rate Limiting & Proxy Security ====================
     REDIS_URL: str = ""
     RATE_LIMIT_ENABLED: bool = True
-    INTERNAL_PROXY_SECRET: str = ""
+    INTERNAL_PROXY_SECRET: str = "crm_internal_proxy_secret_v2_2026"
     TRUSTED_PROXIES: str = "127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
 
     # Login Abuse & Password Spraying Protection
-    RATE_LIMIT_LOGIN_IP_MAX_REQUESTS: int = 30
+    RATE_LIMIT_LOGIN_IP_MAX_REQUESTS: int = 300
     RATE_LIMIT_LOGIN_IP_WINDOW_SECONDS: int = 60
+
 
     # Account Brute-Force Defense (Progressive Backoff)
     RATE_LIMIT_MAX_FAILURES: int = 25

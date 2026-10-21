@@ -1,6 +1,7 @@
 import time
 import math
 import hashlib
+import hmac
 import ipaddress
 import logging
 import threading
@@ -135,7 +136,7 @@ def _get_trusted_networks() -> List[Any]:
 
 
 def is_trusted_proxy_ip(ip: Optional[str]) -> bool:
-    """Returns True if the IP belongs to a configured trusted reverse proxy or local RFC1918 subnet."""
+    """Returns True if the IP belongs to a configured trusted reverse proxy network."""
     if not ip or ip.strip().lower() in ("unknown", "localhost", "testclient"):
         return True
     ip_clean = ip.strip()
@@ -151,23 +152,36 @@ def is_trusted_proxy_ip(ip: Optional[str]) -> bool:
     return False
 
 
+# Backward-compatible alias
+is_private_or_loopback_ip = is_trusted_proxy_ip
+
+
+
 def get_client_ip(request: Request) -> str:
     """
-    Extracts the verified client IP address.
-    Protects against IP spoofing: forwarding headers (X-Forwarded-For, X-App-Client-IP, etc.)
-    are ONLY trusted if the direct connection originates from a verified trusted proxy OR
-    the request contains the validated INTERNAL_PROXY_SECRET header.
+    Extracts the genuine client IP address across reverse proxies and CDNs:
+    1. X-App-Client-IP (explicitly forwarded by our verified Next.js /api/proxy)
+    2. CF-Connecting-IP (Cloudflare edge proxy)
+    3. Leftmost public IP from X-Forwarded-For (client -> proxy1 -> proxy2)
+    4. X-Real-IP
+    5. Direct request.client.host fallback
     """
-    direct_host = request.client.host if (request.client and request.client.host) else "127.0.0.1"
-    if direct_host.startswith("::ffff:"):
-        direct_host = direct_host[7:]
+    direct_host = "127.0.0.1"
+    if request.client and request.client.host:
+        direct_host = request.client.host
+        if direct_host.startswith("::ffff:"):
+            direct_host = direct_host[7:]
 
-    # Check proxy secret authorization
-    expected_secret = getattr(settings, "INTERNAL_PROXY_SECRET", "").strip()
+    # Proxy verification: either direct caller is in trusted proxy IP network,
+    # or request bears valid internal proxy secret header
     has_valid_secret = False
-    if expected_secret:
-        proxy_secret_hdr = request.headers.get("X-Internal-Proxy-Secret") or request.headers.get("x-internal-proxy-secret")
-        if proxy_secret_hdr and proxy_secret_hdr.strip() == expected_secret:
+    proxy_secret_header = (
+        request.headers.get("x-internal-proxy-secret")
+        or request.headers.get("X-Internal-Proxy-Secret")
+    )
+    expected_secret = getattr(settings, "INTERNAL_PROXY_SECRET", "")
+    if proxy_secret_header and expected_secret:
+        if hmac.compare_digest(proxy_secret_header.strip(), expected_secret.strip()):
             has_valid_secret = True
 
     is_trusted = has_valid_secret or is_trusted_proxy_ip(direct_host)
@@ -211,6 +225,7 @@ def get_client_ip(request: Request) -> str:
             return clean_val
 
     return direct_host
+
 
 
 # ==================== Core In-Memory Data Structures ====================
