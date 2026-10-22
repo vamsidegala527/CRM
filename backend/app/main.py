@@ -132,8 +132,19 @@ def read_root():
 @app.get("/api/health")
 def health_check():
     from app.rate_limiter import metrics
+    from app.database import engine
+    # pyrefly: ignore [missing-import]
+    from sqlalchemy import text
+    db_info = {"status": "ok", "error": None}
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as e:
+        db_info = {"status": "error", "error": str(e)}
     return {
-        "status": "ok",
+        "status": "ok" if db_info["status"] == "ok" else "degraded",
+        "database": db_info,
         "rate_limiter": metrics.snapshot()
     }
+
 

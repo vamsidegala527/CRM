@@ -11,6 +11,8 @@ if db_url.startswith("postgres://"):
 connect_args = {}
 if "postgresql" in db_url:
     connect_args["connect_timeout"] = 30
+    if "sslmode" not in db_url:
+        connect_args["sslmode"] = "prefer"
 
 engine = create_engine(
     db_url,
