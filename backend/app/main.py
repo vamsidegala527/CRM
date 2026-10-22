@@ -78,6 +78,10 @@ app.add_middleware(
 from fastapi.responses import JSONResponse
 # pyrefly: ignore [missing-import]
 from fastapi.exceptions import HTTPException as FastAPIHTTPException
+# pyrefly: ignore [missing-import]
+from sqlalchemy.exc import SQLAlchemyError
+# pyrefly: ignore [missing-import]
+from fastapi import status as http_status
 from app.rate_limiter import limiter, get_client_ip
 
 @app.exception_handler(FastAPIHTTPException)
@@ -98,6 +102,14 @@ async def http_exception_handler(request: Request, exc: FastAPIHTTPException):
         status_code=exc.status_code,
         content={"detail": exc.detail},
         headers=headers
+    )
+
+@app.exception_handler(SQLAlchemyError)
+async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
+    return JSONResponse(
+        status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": "Database is waking up. Please wait a moment and try again."},
+        headers={"Retry-After": "5"}
     )
 
 # Register API Routers

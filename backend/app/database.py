@@ -10,11 +10,12 @@ if db_url.startswith("postgres://"):
 
 connect_args = {}
 if "postgresql" in db_url:
-    connect_args["connect_timeout"] = 2
+    connect_args["connect_timeout"] = 30
 
 engine = create_engine(
     db_url,
     pool_pre_ping=True,
+    pool_recycle=300,
     connect_args=connect_args
 )
 

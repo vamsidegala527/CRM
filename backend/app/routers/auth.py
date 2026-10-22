@@ -266,7 +266,15 @@ def login_for_access_token(
     db: Session = Depends(get_db)
 ):
     email_clean = user_credentials.email.strip().lower()
-    user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
+    try:
+        user = db.query(User).filter(func.lower(func.trim(User.email)) == email_clean).first()
+    except Exception as db_exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database is waking up. Please wait a moment and try again.",
+            headers={"Retry-After": "5"}
+        )
 
     
     # 1. Unrecognized User: entered email does not belong to any employee/admin account
@@ -333,8 +341,17 @@ def login_for_access_token(
 
     # Clear any previous session revocation timestamp on successful new login
     user.token_revoked_at = None
-    db.commit()
-    db.refresh(user)
+    try:
+        db.commit()
+        db.refresh(user)
+    except Exception as db_exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database is waking up. Please wait a moment and try again.",
+            headers={"Retry-After": "5"}
+        )
+
 
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(

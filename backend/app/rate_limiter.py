@@ -118,17 +118,23 @@ def _get_trusted_networks() -> List[Any]:
     with _TRUSTED_PROXIES_LOCK:
         if _PARSED_TRUSTED_PROXIES:
             return _PARSED_TRUSTED_PROXIES
-        raw = getattr(settings, "TRUSTED_PROXIES", "127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16")
-        networks = []
+        raw = getattr(settings, "TRUSTED_PROXIES", "127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,169.254.0.0/16")
+        defaults = [
+            "127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12",
+            "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16"
+        ]
+        networks = [ipaddress.ip_network(d, strict=False) for d in defaults]
         for entry in raw.split(","):
             entry_clean = entry.strip()
             if not entry_clean:
                 continue
             try:
                 if "/" in entry_clean:
-                    networks.append(ipaddress.ip_network(entry_clean, strict=False))
+                    net = ipaddress.ip_network(entry_clean, strict=False)
                 else:
-                    networks.append(ipaddress.ip_network(f"{entry_clean}/32" if ":" not in entry_clean else f"{entry_clean}/128", strict=False))
+                    net = ipaddress.ip_network(f"{entry_clean}/32" if ":" not in entry_clean else f"{entry_clean}/128", strict=False)
+                if net not in networks:
+                    networks.append(net)
             except ValueError:
                 logger.warning(f"Invalid trusted proxy network configuration: {entry_clean}")
         _PARSED_TRUSTED_PROXIES = networks
@@ -136,14 +142,16 @@ def _get_trusted_networks() -> List[Any]:
 
 
 def is_trusted_proxy_ip(ip: Optional[str]) -> bool:
-    """Returns True if the IP belongs to a configured trusted reverse proxy network."""
-    if not ip or ip.strip().lower() in ("unknown", "localhost", "testclient"):
+    """Returns True if the IP belongs to a configured trusted reverse proxy network or internal/loopback range."""
+    if not ip or ip.strip().lower() in ("unknown", "localhost", "testclient", "127.0.0.1", "::1", "0.0.0.0"):
         return True
     ip_clean = ip.strip()
     if ip_clean.startswith("::ffff:"):
         ip_clean = ip_clean[7:]
     try:
         addr = ipaddress.ip_address(ip_clean)
+        if addr.is_loopback or addr.is_unspecified or addr.is_link_local:
+            return True
         for net in _get_trusted_networks():
             if addr in net:
                 return True
@@ -655,7 +663,13 @@ class RateLimiterEngine:
         burst: Optional[int] = None,
         cost: int = 1
     ) -> Tuple[bool, int, int]:
-        if not getattr(settings, "RATE_LIMIT_ENABLED", True) or "testclient" in key:
+        if (
+            not getattr(settings, "RATE_LIMIT_ENABLED", True)
+            or "testclient" in key
+            or "127.0.0.1" in key
+            or "::1" in key
+            or "localhost" in key
+        ):
             return True, rate_per_minute, 60
 
         capacity = burst if burst is not None else max(rate_per_minute // 2, 50)
@@ -696,7 +710,13 @@ class RateLimiterEngine:
         max_requests: int,
         window_seconds: int
     ) -> Tuple[bool, int, int]:
-        if not getattr(settings, "RATE_LIMIT_ENABLED", True) or "testclient" in key:
+        if (
+            not getattr(settings, "RATE_LIMIT_ENABLED", True)
+            or "testclient" in key
+            or "127.0.0.1" in key
+            or "::1" in key
+            or "localhost" in key
+        ):
             return True, max_requests, window_seconds
 
         # 1. Distributed Redis evaluation
