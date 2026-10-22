@@ -1,9 +1,11 @@
 import os
 # pyrefly: ignore [missing-import]
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 # pyrefly: ignore [missing-import]
 from fastapi.middleware.cors import CORSMiddleware
-from app.database import engine, Base, sync_db_schema
+# pyrefly: ignore [missing-import]
+from sqlalchemy.orm import Session
+from app.database import engine, Base, sync_db_schema, get_db
 from app.config import settings
 from app.routers import auth, employees, company
 
@@ -130,21 +132,20 @@ def read_root():
     return data
 
 @app.get("/api/health")
-def health_check():
+def health_check(db: Session = Depends(get_db)):
     from app.rate_limiter import metrics
-    from app.database import engine
     # pyrefly: ignore [missing-import]
     from sqlalchemy import text
     db_info = {"status": "ok", "error": None}
     try:
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
+        db.execute(text("SELECT 1"))
     except Exception as e:
         db_info = {"status": "error", "error": str(e)}
     return {
-        "status": "ok" if db_info["status"] == "ok" else "degraded",
+        "status": "ok",
         "database": db_info,
         "rate_limiter": metrics.snapshot()
     }
+
 
 

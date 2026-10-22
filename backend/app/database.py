@@ -4,15 +4,39 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 from app.config import settings
 
+import socket
+from urllib.parse import urlparse, urlunparse
+
 db_url = settings.DATABASE_URL
 if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
+
+# Render Cloud DNS Resolution:
+# If DATABASE_URL provides a bare internal hostname (e.g., 'dpg-xxxx-a') and internal DNS fails,
+# resolve against Render regional postgres domains to prevent '[Errno -2] Name or service not known'.
+try:
+    parsed_db = urlparse(db_url)
+    if parsed_db.hostname and parsed_db.hostname.startswith("dpg-") and "." not in parsed_db.hostname:
+        try:
+            socket.gethostbyname(parsed_db.hostname)
+        except socket.gaierror:
+            for region in ["oregon", "frankfurt", "ohio", "singapore", "virginia"]:
+                candidate = f"{parsed_db.hostname}.{region}-postgres.render.com"
+                try:
+                    socket.gethostbyname(candidate)
+                    netloc = parsed_db.netloc.replace(parsed_db.hostname, candidate)
+                    db_url = urlunparse((parsed_db.scheme, netloc, parsed_db.path, parsed_db.params, parsed_db.query, parsed_db.fragment))
+                    break
+                except socket.gaierror:
+                    continue
+except Exception as parse_err:
+    print(f"Database URL resolution notice: {parse_err}")
 
 connect_args = {}
 if "postgresql" in db_url:
     connect_args["connect_timeout"] = 30
     if "sslmode" not in db_url:
-        connect_args["sslmode"] = "prefer"
+        connect_args["sslmode"] = "require" if "render.com" in db_url else "prefer"
 
 engine = create_engine(
     db_url,
